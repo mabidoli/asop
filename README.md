@@ -88,7 +88,14 @@ because existing readers already tolerate both. See `asop/__init__.py`.
 
 ## Install
 
-    pip install asop      # or: uv add asop
+    pip install asop-spec      # or: uv add asop-spec
+
+The distribution is `asop-spec`; the import is `asop`:
+
+    from asop import validate_gate, Refusal
+
+(The bare `asop` name on PyPI was taken by an unrelated placeholder before this
+package existed.)
 
 **Standard library only, and that is a rule rather than a coincidence.** This
 package is imported by every side of the contract, so a dependency taken here is
