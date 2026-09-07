@@ -564,8 +564,7 @@ stack trace. Codes relevant to ASOPs, from `asop.refusals`, plus the ones v3 add
    *performance steps*, each with *performance measures* rated GO/NO-GO — a one-to-one
    map onto ASOP / Step / gate. "Step" is also the unit in ISO 9001 work instructions,
    fire-service SOPs and police procedures; aviation's "item" is a checklist line, not an
-   activity with an owner and a proof. (Vault: `1 - Projects/AgentCo/Research/2026-09-04
-   SOP terminology across domains`.)
+   activity with an owner and a proof.
 2. **Ordering.** **DECIDED 2026-09-04: ship `after` in v3.** Linear is the default
    (`after: [n-1]`); a Step may declare `after` explicitly to run in parallel with
    siblings, and the tree carries it as `blocked_by`. Validated at `sop_create`: a

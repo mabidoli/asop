@@ -1,4 +1,15 @@
-# agentco-asop
+# asop
+
+**The ASOP contract — a versioned, verified, self-revising procedure standard for agentic work.**
+
+This repository is the normative specification ([`ASOP.md`](ASOP.md)) and its
+reference implementation. It is deliberately standalone: it depends on nothing,
+and nothing in it imports a coordination plane or a runtime.
+
+Two independent implementations speak it today — the
+[AgentCo Hub](https://github.com/agentic-co/agentic-co-hub) (coordination) and the
+[AgentCo Harness](https://github.com/agentic-co/agentic-co-harness) (execution).
+Others are welcome; that is the point of writing it down.
 
 > **v3 (2026-09-04).** The record contract now carries `ASOP` — a versioned,
 > ordered sequence of `Step`s for one type of task, with the gate on the step
@@ -17,7 +28,7 @@ importing the other. This package is that agreement.
 
 ## Who imports this
 
-- The [AgentCo coordination plane](../..) (`agentco/gates.py`,
+- The [AgentCo Hub](https://github.com/agentic-co/agentic-co-hub) (`agentco/gates.py`,
   `agentco/errors.py`, `agentco/sop.py` and `agentco/policy.py` are thin shims
   over this package, keeping every existing caller and test unchanged).
 - The [AgentCo Harness](https://github.com/agentic-co/agentic-co-harness), the
@@ -77,15 +88,12 @@ because existing readers already tolerate both. See `asop/__init__.py`.
 
 ## Install
 
-Not published standalone yet — used as a workspace member of the parent
-repo (`[tool.uv.sources]` in the root `pyproject.toml` points `agentco-asop`
-at `packages/asop`, editable). A harness in a different repo installs it
-the ordinary way once published: `pip install agentco-asop` /
-`uv add agentco-asop`.
+    pip install asop      # or: uv add asop
 
-Standard library only — see `../../CONTRIBUTING.md`'s dependency rule. This
-package is imported by both sides of the contract, so a dependency here is
-forced on both.
+**Standard library only, and that is a rule rather than a coincidence.** This
+package is imported by every side of the contract, so a dependency taken here is
+forced on everyone who speaks it. A standard that drags a dependency tree behind
+it is a framework wearing a standard's clothes.
 
 ## Licence
 
@@ -93,4 +101,4 @@ forced on both.
 contract other people's harnesses are asked to depend on, and a contract adopted
 across organisations needs the grant stated in the file rather than implied.
 
-Copyright 2026 The AgentCo Authors.
+Copyright 2026 Marcelo Bidoli Fernandes and the ASOP Authors.
