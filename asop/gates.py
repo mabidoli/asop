@@ -91,7 +91,14 @@ CLOCK_CORE_FIELDS = ("max_park_seconds", "on_timeout")
 EXECUTION_FIELDS = ("cwd", "timeout_s", "rubric", "judge_route")
 GATE_FIELDS = CORE_FIELDS + CLOCK_FIELDS + EXECUTION_FIELDS
 
-ATTESTATION_FIELDS = ("check", "exit_status", "environment", "at", "submitted_by")
+ATTESTATION_FIELDS = (
+    "check",
+    "stage",
+    "exit_status",
+    "environment",
+    "at",
+    "submitted_by",
+)
 
 SCHEMA_VERSION = 1
 
@@ -519,15 +526,54 @@ def validate_attestation(payload: Any, *, gate: dict, submitted_by: str) -> dict
             "Set check to the command you re-ran, exactly as the gate "
             "declares it.",
         )
-    gate_check = gate.get("check")
-    if check.strip() != gate_check:
-        _refuse(
-            ATTESTATION_INVALID,
-            f"the attestation is about {check.strip()!r}, but this item's "
-            f"gate checks {gate_check!r}",
-            f"Run {gate_check!r} and attest to that. Evidence about a "
-            f"different command is not evidence about this item.",
-        )
+    # A staged gate is a ladder of commands, and evidence that cannot say
+    # WHICH rung it climbed is not evidence about the ladder. So a staged gate
+    # takes one attestation per stage, each pinned to its index; a single-check
+    # gate takes one, and refuses an index it has no rung for.
+    staged = gate.get("checks")
+    stage = payload.get("stage")
+    if staged:
+        if isinstance(stage, bool) or not isinstance(stage, int):
+            _refuse(
+                ATTESTATION_INVALID,
+                f"this gate runs {len(staged)} staged checks, so the "
+                f"attestation must say which one it is about; got "
+                f"stage={stage!r}",
+                f"Set stage to the index of the check you ran, 0 to "
+                f"{len(staged) - 1}.",
+            )
+        if not 0 <= stage < len(staged):
+            _refuse(
+                ATTESTATION_INVALID,
+                f"stage {stage} is outside this gate's {len(staged)} checks",
+                f"Set stage between 0 and {len(staged) - 1}.",
+            )
+        if check.strip() != staged[stage]:
+            _refuse(
+                ATTESTATION_INVALID,
+                f"the attestation is about {check.strip()!r}, but stage "
+                f"{stage} of this gate checks {staged[stage]!r}",
+                f"Run {staged[stage]!r} and attest to that, or correct the "
+                f"stage index. Evidence about a different command is not "
+                f"evidence about this stage.",
+            )
+    else:
+        if stage is not None:
+            _refuse(
+                ATTESTATION_INVALID,
+                f"this gate has a single check, so it has no stage "
+                f"{stage!r} to attest to",
+                "Omit stage. Only a gate declaring `checks` is staged.",
+            )
+        gate_check = gate.get("check")
+        if check.strip() != gate_check:
+            _refuse(
+                ATTESTATION_INVALID,
+                f"the attestation is about {check.strip()!r}, but this item's "
+                f"gate checks {gate_check!r}",
+                f"Run {gate_check!r} and attest to that. Evidence about a "
+                f"different command is not evidence about this item.",
+            )
 
     exit_status = payload.get("exit_status")
     if isinstance(exit_status, bool) or not isinstance(exit_status, int):
@@ -556,18 +602,43 @@ def validate_attestation(payload: Any, *, gate: dict, submitted_by: str) -> dict
             "attestation is indistinguishable from a fresh one.",
         )
 
-    return {
+    # `stage` is present exactly when the gate is staged. Carrying it always,
+    # `None` on a single-check gate, would make "which rung" a question every
+    # reader has to ask of every attestation; carrying it only when it means
+    # something keeps the record honest about its own shape.
+    normalised = {
         "check": check.strip(),
         "exit_status": exit_status,
         "environment": environment.strip(),
         "at": at.strip(),
         "submitted_by": submitted_by,
     }
+    if staged:
+        normalised["stage"] = stage
+    return normalised
 
 
 def attestation_passes(attestation: dict) -> bool:
     """Exit 0 and nothing else. The one place this convention is stated."""
     return attestation.get("exit_status") == 0
+
+
+def gate_satisfied(gate: dict, attestations: Sequence[dict]) -> bool:
+    """Is this gate answered by these attestations?
+
+    A single-check gate wants one passing attestation. A staged gate wants one
+    per stage, every rung climbed and every rung green — a ladder with a missing
+    rung is not a ladder that was climbed, and the failure it hides is exactly
+    the one staging was introduced to surface.
+
+    Attestations are assumed already validated against this gate; this asks
+    only whether the set of them is complete.
+    """
+    passing = [a for a in attestations if attestation_passes(a)]
+    staged = gate.get("checks")
+    if not staged:
+        return bool(passing)
+    return {a.get("stage") for a in passing} >= set(range(len(staged)))
 
 
 def retry_decision(failures: int) -> str:

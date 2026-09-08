@@ -21,19 +21,26 @@
 # implementation disagree, so the assertions record the prose and these notes
 # record the conflict:
 #
-#   A009 / ASOP.md:96 — "Every gate carries a park clock and an escalation
-#   path; a gate with no timeout is a deadlock." The implementation and
-#   schema/v1/gate.yaml both treat the clock group as OPTIONAL: validate_gate
-#   with require=() accepts a gate carrying no clock, and that is the
-#   documented path for a caller with no park-clock concept. An implementer
-#   reading the prose and one reading the code would disagree about whether
-#   the same gate is valid.
+#   A009 / ASOP.md 2.2 — RESOLVED 2026-09-07. The prose said every gate
+#   carries a park clock and that a gate without a timeout is a deadlock,
+#   while every implementation treated the group as optional. The prose was
+#   relaxed to match: the clock is required where work can park, omitted
+#   entirely by a caller with no parking concept, and declared as a whole or
+#   not at all. Relaxing rather than tightening because an optional clock is
+#   what lets a single-principal runtime adopt this at all.
 #
 #   ASOP.md 3.5 — "the outer step's gate, if any, applies to the inner run as
 #   a whole", while the record contract refuses any body on a `uses` step.
 #   schema/v1/step.yaml follows the stricter contract and says so.
 #
-# Both need a prose decision before v1 is called final.
+# The `uses` erratum still needs a prose decision before v1 is called final.
+#
+# NEW RULE, 2026-09-07 — staged gates. A gate declaring `checks` takes one
+# attestation per rung, each pinned to its index, and is answered only when
+# every rung is present and passing. Added because the feature was previously
+# unusable: a staged gate normalised to `check: None` and refused every
+# possible attestation. Assertions covering it are not yet extracted; the next
+# extraction pass should pick them up from ASOP.md 2.2.
 
 
 - id: A001
@@ -86,10 +93,10 @@
   violation: "A step is marked complete despite failing its gate validation."
 - id: A009
   section: "2.2"
-  rule: "Every gate carries a park clock and an escalation path."
+  rule: "A gate may carry a park clock and an escalation path; where work can park, the clock is required, and it is declared as a whole or not at all."
   applies_to: gate
   testable: true
-  violation: "A gate definition lacks both a timeout clock and an escalation route."
+  violation: "A gate declaring some clock fields but not the rest; or a caller requiring the clock group accepting a gate that omits it."
 - id: A010
   section: "2.3"
   rule: "When execution departs from a step, the departure is captured and adjudicated by a party other than the executor."

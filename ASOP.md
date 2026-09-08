@@ -93,8 +93,26 @@ whoever executes or files it. It is one of three kinds:
 
 The gate is enforced **where completion is recorded**, not where the work is done. A
 run whose step cannot pass its gate did not complete that step, whatever the transcript
-says. Every gate carries a park clock and an escalation path (§9); a gate with no
-timeout is a deadlock.
+says. A gate MAY carry a park clock and an escalation path (§9), and where work can
+wait — a plane that parks a human gate and comes back to it — a gate with no
+timeout is a deadlock, so the clock is required there. A caller with no parking
+concept omits the group entirely and treats a timeout as an ordinary failure.
+The clock is declared as a whole or not at all: a gate carrying some of its
+fields but not the rest is always refused, whether or not the caller requires
+the group.
+
+This was stated as an absolute in earlier drafts, while every implementation
+made it optional. An implementer reading the prose and one reading the code
+disagreed about whether the same gate was valid, which is the disagreement a
+standard exists to prevent.
+
+A gate may declare a single `check` or an ordered ladder of `checks`. A ladder
+takes **one attestation per rung**, each pinned to its index, and is answered
+only when every rung is present and passing. Evidence that cannot say which rung
+it climbed is not evidence about the ladder, and a ladder with a missing rung is
+not a ladder that was climbed — the failure that hides is the one staging exists
+to surface. A gate with a single `check` has no stage to attest to and refuses
+one.
 
 ### 2.3 Self-revising — divergence is input
 

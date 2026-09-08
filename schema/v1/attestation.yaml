@@ -45,6 +45,20 @@ properties:
       enforced where the attestation is submitted, not here.)
     $ref: '#/$defs/nonBlankString'
 
+  stage:
+    type: integer
+    minimum: 0
+    description: >-
+      Which rung of a staged gate this evidence is about. A gate declaring
+      `checks` is a ladder of commands, and evidence that cannot say which rung
+      it climbed is not evidence about the ladder — so a staged gate takes one
+      attestation per stage, each pinned to its index, and is answered only when
+      every index is present and passing. PRESENT exactly when the gate is
+      staged: a gate with a single `check` has no stage to attest to and refuses
+      one. (Which gate this belongs to, and therefore whether `stage` is
+      required, is a cross-record rule enforced where the attestation is
+      submitted, not here.)
+
   exit_status:
     type: integer
     description: >-
