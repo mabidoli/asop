@@ -27,5 +27,22 @@ dependencies = []
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
 
+[project.urls]
+Homepage = "https://github.com/mabidoli/asop"
+Repository = "https://github.com/mabidoli/asop"
+Specification = "https://github.com/mabidoli/asop/blob/main/ASOP.md"
+Schema = "https://github.com/mabidoli/asop/tree/main/schema/v1"
+Issues = "https://github.com/mabidoli/asop/issues"
+
 [tool.hatch.build.targets.wheel]
 packages = ["asop"]
+
+# The normative artefacts ship INSIDE the wheel, not merely beside it in the
+# sdist. A package called asop-spec that does not contain the spec would make
+# an installed version unable to say what it conforms to; bundling them lets a
+# reader validate against the exact schema their installed version speaks,
+# offline, without fetching a URL that may have moved on.
+[tool.hatch.build.targets.wheel.force-include]
+"schema" = "asop/schema"
+"ASOP.md" = "asop/ASOP.md"
+"conformance/assertions.yaml" = "asop/conformance/assertions.yaml"
