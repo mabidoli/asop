@@ -6,18 +6,17 @@ This repository is the normative specification ([`ASOP.md`](ASOP.md)) and its
 reference implementation. It is deliberately standalone: it depends on nothing,
 and nothing in it imports a coordination plane or a runtime.
 
-Two independent implementations speak it today — the
+Two implementations speak it today — the
 [AgentCo Hub](https://github.com/agentic-co/agentic-co-hub) (coordination) and the
 [AgentCo Harness](https://github.com/agentic-co/agentic-co-harness) (execution).
-Others are welcome; that is the point of writing it down.
+They are independent of each other, and both are mine: the standard has not yet
+been implemented by anyone who did not also write it, which is the honest status
+and the thing I would most like to change.
 
-> **v3 (2026-09-04).** The record contract now carries `ASOP` — a versioned,
-> ordered sequence of `Step`s for one type of task, with the gate on the step
-> — alongside the legacy single-record `SOP`, which stays importable only until
-> the plane's store migrates and is then deleted. `validate_asop` /
-> `validate_step` are the v3 entry points; `validate_fields` is v2's. The
-> definition, verbs and the seven decisions behind v3 are in
-> [`ASOP.md`](ASOP.md).
+What exists to make that possible: a normative [schema](schema/v1/) as JSON
+Schema in YAML, and [39 conformance vectors](conformance/) as data, so an
+implementation in any language can prove it conforms without depending on this
+package or reading a line of Python.
 
 
 **The ASOP contract, as code.** A procedure that is versioned, verified, and

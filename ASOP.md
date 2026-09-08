@@ -12,28 +12,6 @@ vendor, a company, or a tool.
 
 ---
 
-## 0. What changed from v2, and why
-
-v2 defined an ASOP as one procedure record with prose fields and a gate "declared at
-authoring time." Two things turned out to be true of the shipped implementation that
-the text did not say:
-
-1. **One ASOP filed one work item.** A multi-step task was a chain of separate ASOPs
-   linked by `next_sop` — a reading aid, not an executable structure. Nothing walked
-   the chain; the steps could not be gated, attested or revised individually inside
-   one versioned artefact.
-2. **The gate was not on the procedure.** The record had no gate field; whoever filed
-   work supplied the gate at filing time. Where the filer is on the executor's side —
-   the ordinary case for a single-operator organisation — the executor's side authored
-   its own gate, which is the failure mode the contract exists to prevent.
-
-v3 fixes both by changing the grain: **the ASOP is the sequence; the step is what v2
-called the procedure.** Everything v2 got right — the three properties, adjudication,
-the revision policy, the enforcement model, the decomposition bounds — carries forward
-unchanged and now applies per step.
-
----
-
 ## 1. Definition
 
 An **ASOP** is a versioned, ordered sequence of **steps** that together accomplish one
