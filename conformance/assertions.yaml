@@ -1,0 +1,650 @@
+# Normative assertions extracted from ASOP.md
+#
+# Every rule in the prose that an implementation can be tested against, one
+# entry each. This is the traceability layer between the specification and the
+# conformance vectors: a vector cites an assertion id, an assertion cites a
+# section, and a rule with no vector is visibly untested.
+#
+# Fields:
+#   id          stable identifier, cited by conformance vectors
+#   section     the ASOP.md section the rule comes from
+#   rule        the rule as one imperative sentence
+#   applies_to  gate | step | asop | attestation | revision | run
+#   testable    can a document alone prove or violate it
+#   violation   what a document that breaks the rule looks like
+#
+# Extracted 2026-09-07 and checked: 102 unique ids, no missing fields, every
+# applies_to in vocabulary, all 25 cited sections resolve to real headings in
+# ASOP.md, no near-duplicate rules.
+#
+# KNOWN ERRATA surfaced by this extraction — the prose and the reference
+# implementation disagree, so the assertions record the prose and these notes
+# record the conflict:
+#
+#   A009 / ASOP.md:96 — "Every gate carries a park clock and an escalation
+#   path; a gate with no timeout is a deadlock." The implementation and
+#   schema/v1/gate.yaml both treat the clock group as OPTIONAL: validate_gate
+#   with require=() accepts a gate carrying no clock, and that is the
+#   documented path for a caller with no park-clock concept. An implementer
+#   reading the prose and one reading the code would disagree about whether
+#   the same gate is valid.
+#
+#   ASOP.md 3.5 — "the outer step's gate, if any, applies to the inner run as
+#   a whole", while the record contract refuses any body on a `uses` step.
+#   schema/v1/step.yaml follows the stricter contract and says so.
+#
+# Both need a prose decision before v1 is called final.
+
+
+- id: A001
+  section: "2.1"
+  rule: "Every revision of the ASOP is a distinct, immutable version."
+  applies_to: asop
+  testable: true
+  violation: "A version is mutable or two revisions share the same version number."
+- id: A002
+  section: "2.1"
+  rule: "A run pins (asop_id, version) and each of its beads pins (asop_id, version, step)."
+  applies_to: run
+  testable: true
+  violation: "A run or bead lacks the required version pin tuple."
+- id: A003
+  section: "2.1"
+  rule: "Outcomes are recorded against the run pin and each bead pin."
+  applies_to: run
+  testable: true
+  violation: "Outcomes are attached to prose or unversioned records instead of the pinned triples."
+- id: A004
+  section: "2.1"
+  rule: "The ASOP never enters a work queue; only runs do."
+  applies_to: asop
+  testable: true
+  violation: "An ASOP record is placed into a work queue for execution."
+- id: A005
+  section: "2.1"
+  rule: "A later version does not reach back into a run already filed; the run finishes under the version it started under."
+  applies_to: run
+  testable: true
+  violation: "An in-flight run is retroactively modified or re-executed under a newer version."
+- id: A006
+  section: "2.2"
+  rule: "A step's gate is part of the step, written by the ASOP's author, and immutable to whoever executes or files it."
+  applies_to: step
+  testable: true
+  violation: "An executor or filer modifies or overrides the gate text or parameters."
+- id: A007
+  section: "2.2"
+  rule: "The gate is enforced where completion is recorded, not where the work is done."
+  applies_to: gate
+  testable: true
+  violation: "Gate validation occurs at the execution site rather than the completion store."
+- id: A008
+  section: "2.2"
+  rule: "A run whose step cannot pass its gate did not complete that step, whatever the transcript says."
+  applies_to: run
+  testable: true
+  violation: "A step is marked complete despite failing its gate validation."
+- id: A009
+  section: "2.2"
+  rule: "Every gate carries a park clock and an escalation path."
+  applies_to: gate
+  testable: true
+  violation: "A gate definition lacks both a timeout clock and an escalation route."
+- id: A010
+  section: "2.3"
+  rule: "When execution departs from a step, the departure is captured and adjudicated by a party other than the executor."
+  applies_to: step
+  testable: true
+  violation: "A divergence is left unrecorded or adjudicated by the same route that executed the step."
+- id: A011
+  section: "2.3"
+  rule: "A plan-vs-actual review is written per step at the moment that step completes."
+  applies_to: step
+  testable: true
+  violation: "The review is omitted, delayed, or written for a different step."
+- id: A012
+  section: "2.3"
+  rule: "Revision is deliberate and never silent."
+  applies_to: asop
+  testable: true
+  violation: "A version change occurs without explicit proposal accumulation and human or policed agent activation."
+- id: A013
+  section: "3.1"
+  rule: "An ASOP has at most 7 steps at one level and nests at most 3 deep."
+  applies_to: asop
+  testable: true
+  violation: "A procedure contains more than 7 sibling steps or exceeds 3 nesting levels."
+- id: A014
+  section: "3.1"
+  rule: "author_kind is set by the operator and never inferred."
+  applies_to: asop
+  testable: true
+  violation: "The system auto-detects author_kind from names or metadata instead of using an explicit operator declaration."
+- id: A015
+  section: "3.3"
+  rule: "A harness that lets a filer or executor override a step's gate is not conforming."
+  applies_to: gate
+  testable: true
+  violation: "The runtime accepts modified gate parameters from filers or executors."
+- id: A016
+  section: "3.3"
+  rule: "A human gate must name its verifier."
+  applies_to: gate
+  testable: true
+  violation: "A human gate definition omits the verifier field."
+- id: A017
+  section: "3.3"
+  rule: "A deterministic gate must not name its verifier."
+  applies_to: gate
+  testable: true
+  violation: "A deterministic gate definition includes a verifier field."
+- id: A018
+  section: "3.4"
+  rule: "after is validated at sop_create; a reference to a step that does not exist or a cycle is refused."
+  applies_to: step
+  testable: true
+  violation: "The system accepts dangling references or cyclic ordering dependencies."
+- id: A019
+  section: "3.5"
+  rule: "Depth counts against the 3-deep bound."
+  applies_to: asop
+  testable: true
+  violation: "Nested ASOPs exceed the maximum recursion depth allowed by the parent."
+- id: A020
+  section: "3.5"
+  rule: "The inner ASOP's gates are its own; the outer step's gate, if any, applies to the inner run as a whole."
+  applies_to: step
+  testable: true
+  violation: "Outer gates are applied to inner steps, or inner gates are ignored by the outer run."
+- id: A021
+  section: "3.6"
+  rule: "distinct: [a, b] means the binding that fills a in a run may not fill b in that run."
+  applies_to: run
+  testable: true
+  violation: "A single agent or route is bound to both roles a and b in the same run."
+- id: A022
+  section: "3.6"
+  rule: "A step whose gate is judged is evaluated by a route distinct from the route that executed it."
+  applies_to: gate
+  testable: true
+  violation: "The judge route matches the executor route for a judged gate."
+- id: A023
+  section: "3.6"
+  rule: "A step of role validator over another step's output may not share a binding with that step's role."
+  applies_to: step
+  testable: true
+  violation: "The validator and the original step share the same agent or route binding."
+- id: A024
+  section: "3.6"
+  rule: "A harness that cannot satisfy a constraint refuses the run and does not quietly bind the same agent twice."
+  applies_to: run
+  testable: true
+  violation: "The runtime silently binds conflicting roles instead of returning a constraint refusal."
+- id: A025
+  section: "3.6"
+  rule: "A human role's steps carry human gates by construction."
+  applies_to: step
+  testable: true
+  violation: "A step assigned to a human role uses a deterministic or judged gate."
+- id: A026
+  section: "3.6"
+  rule: "A step carrying a protected tag carries a human gate by construction."
+  applies_to: step
+  testable: true
+  violation: "A step tagged money or irreversible uses a non-human gate."
+- id: A027
+  section: "3.6"
+  rule: "The record refuses a gate that means nobody looks before the step counts as done."
+  applies_to: gate
+  testable: true
+  violation: "A protected or human role step is allowed to pass without human verification."
+- id: A028
+  section: "4"
+  rule: "DRAFT status cannot be run."
+  applies_to: asop
+  testable: true
+  violation: "The system accepts run filings against a DRAFT version."
+- id: A029
+  section: "4"
+  rule: "Exactly one version of an asop_id is active at a time."
+  applies_to: asop
+  testable: true
+  violation: "Multiple versions of the same asop_id are marked ACTIVE simultaneously."
+- id: A030
+  section: "4"
+  rule: "ACTIVE versions are immutable."
+  applies_to: asop
+  testable: true
+  violation: "Fields of an ACTIVE version are modified after activation."
+- id: A031
+  section: "4"
+  rule: "SUPERSEDED versions are kept forever and runs pinned to them must stay resolvable."
+  applies_to: asop
+  testable: true
+  violation: "A SUPERSEDED version is deleted or its outcomes become unreadable."
+- id: A032
+  section: "4"
+  rule: "RETIRED versions refuse new runs."
+  applies_to: asop
+  testable: true
+  violation: "The system accepts run filings against a RETIRED version."
+- id: A033
+  section: "4"
+  rule: "An agent may not withdraw a procedure."
+  applies_to: asop
+  testable: true
+  violation: "An agent calls sop_retire or triggers a retirement workflow."
+- id: A034
+  section: "4"
+  rule: "revise never edits a version; it creates a new DRAFT from an existing version plus a change set."
+  applies_to: asop
+  testable: true
+  violation: "The revise verb modifies an existing version in place instead of creating a new DRAFT."
+- id: A035
+  section: "4"
+  rule: "Activation of a revision is policed when the reviser is an agent."
+  applies_to: revision
+  testable: true
+  violation: "An agent-activated revision bypasses the revision policy checks."
+- id: A036
+  section: "5.1"
+  rule: "The version must be ACTIVE; a draft refuses the run."
+  applies_to: run
+  testable: true
+  violation: "A run is filed against a non-ACTIVE version."
+- id: A037
+  section: "5.1"
+  rule: "Every declared input is supplied, or the run refuses."
+  applies_to: run
+  testable: true
+  violation: "The system accepts a run with missing declared inputs."
+- id: A038
+  section: "5.1"
+  rule: "Every role resolves to a binding satisfying every constraint, or the run refuses."
+  applies_to: run
+  testable: true
+  violation: "A run proceeds with an unbound role or a constraint-violating binding."
+- id: A039
+  section: "5.1"
+  rule: "Each step bead carries a copy of its step's text and gate, pinned."
+  applies_to: step
+  testable: true
+  violation: "A bead references the live ASOP text instead of embedding a frozen copy."
+- id: A040
+  section: "5.1"
+  rule: "The child is written into the parent's blocked_by in the same lock that files it."
+  applies_to: run
+  testable: true
+  violation: "Parent-child blocking relationships are updated asynchronously or out of the filing transaction."
+- id: A041
+  section: "5.1"
+  rule: "A parent cannot close while a child is open."
+  applies_to: run
+  testable: true
+  violation: "The parent bead transitions to done while a child bead remains in progress or failed."
+- id: A042
+  section: "5.1"
+  rule: "Decomposition bounds apply to the tree as filed."
+  applies_to: run
+  testable: true
+  violation: "The system accepts a bead tree exceeding the 7-step or 3-depth limits."
+- id: A043
+  section: "5.2"
+  rule: "Completion is requested, not declared; the store runs the gate at its own status flip."
+  applies_to: step
+  testable: true
+  violation: "The executor directly sets the bead status to done without store-side gate execution."
+- id: A044
+  section: "5.2"
+  rule: "Neither verify_failed nor awaiting_verify releases anything downstream."
+  applies_to: step
+  testable: true
+  violation: "Downstream steps are unblocked while a parent remains in verify_failed or awaiting_verify."
+- id: A045
+  section: "5.3"
+  rule: "Where the store and the plane are different trust domains, the executing domain submits an attestation and the plane verifies and stores the claim."
+  applies_to: attestation
+  testable: true
+  violation: "The plane executes checks directly or skips attestation verification across trust domains."
+- id: A046
+  section: "5.3"
+  rule: "A judged or human gate's attestation names the judge or the person."
+  applies_to: attestation
+  testable: true
+  violation: "The attestation omits the judge or human verifier identity."
+- id: A047
+  section: "5.3"
+  rule: "A deterministic gate's attestation names the executor."
+  applies_to: attestation
+  testable: true
+  violation: "The deterministic attestation fails to identify the executing principal."
+- id: A048
+  section: "5.4"
+  rule: "A failed step keeps its failed status until its own gate is re-run and passes."
+  applies_to: step
+  testable: true
+  violation: "A step transitions to done without a successful post-failure gate re-evaluation."
+- id: A049
+  section: "5.4"
+  rule: "Repair is a sibling repair bead filed beside, never beneath."
+  applies_to: step
+  testable: true
+  violation: "A repair bead is nested under the failed step instead of filed as a sibling."
+- id: A050
+  section: "5.4"
+  rule: "A repair bead does not count against the parent's budget."
+  applies_to: step
+  testable: true
+  violation: "The system decrements the parent's step count or depth limit for repair beads."
+- id: A051
+  section: "5.4"
+  rule: "First failure files one repair bead; second failure escalates to a human; there is no third autonomous attempt."
+  applies_to: step
+  testable: true
+  violation: "The system allows a third autonomous repair attempt or skips human escalation on the second failure."
+- id: A052
+  section: "5.5"
+  rule: "The run's parent bead closes when every step bead is done."
+  applies_to: run
+  testable: true
+  violation: "The parent bead remains open while all children are done, or closes prematurely."
+- id: A053
+  section: "5.5"
+  rule: "At run completion, a plan-vs-actual review is written for the run from the per-step reviews."
+  applies_to: run
+  testable: true
+  violation: "The run-level review is missing or not synthesized from step reviews."
+- id: A054
+  section: "5.5"
+  rule: "At run completion, the run's outcome is recorded against (asop_id, version) and each step's against (asop_id, version, step)."
+  applies_to: run
+  testable: true
+  violation: "Outcomes are recorded against unversioned IDs or incorrect step triples."
+- id: A055
+  section: "5.5"
+  rule: "At run completion, open adjudications on the run are queued for the lessons pass."
+  applies_to: run
+  testable: true
+  violation: "Adjudications are discarded or not forwarded to the propose cadence."
+- id: A056
+  section: "6.1"
+  rule: "The adjudicator must not be the executor."
+  applies_to: step
+  testable: true
+  violation: "The adjudication record shows the same route or agent as the executor."
+- id: A057
+  section: "6.1"
+  rule: "The adjudicator must adjudicate an executed step."
+  applies_to: step
+  testable: true
+  violation: "An adjudication is filed for a step that never reached execution."
+- id: A058
+  section: "6.1"
+  rule: "Adjudication occurs once per divergence."
+  applies_to: step
+  testable: true
+  violation: "Multiple adjudication records exist for the same divergence event."
+- id: A059
+  section: "6.1"
+  rule: "A route may adjudicate an agent's step when it is distinct from the executor's route and the operator declared it as an adjudicator."
+  applies_to: step
+  testable: true
+  violation: "An undeclared route adjudicates, or a declared route matches the executor's route."
+- id: A060
+  section: "6.1"
+  rule: "A registry with no declared adjudicator makes the operator the only one."
+  applies_to: asop
+  testable: true
+  violation: "The system allows automated adjudication when no adjudicator registry entry exists."
+- id: A061
+  section: "6.2"
+  rule: "A plan-vs-actual review is written at the moment a step completes."
+  applies_to: step
+  testable: true
+  violation: "The review is backdated, delayed, or generated asynchronously after context loss."
+- id: A062
+  section: "6.3"
+  rule: "propose reads adjudications nobody has proposed yet and drafts the next version."
+  applies_to: asop
+  testable: true
+  violation: "The propose pass skips unproposed adjudications or drafts against an already activated version."
+- id: A063
+  section: "6.3"
+  rule: "Good adjudications are drafted into the step's proposals; bad ones into the step's common_mistakes."
+  applies_to: step
+  testable: true
+  violation: "Adjudication outcomes are placed in the wrong draft fields."
+- id: A064
+  section: "6.3"
+  rule: "Structural changes are proposed only when the evidence is the same divergence recurring at the same boundary."
+  applies_to: asop
+  testable: true
+  violation: "The propose pass introduces structural changes without recurring boundary divergence evidence."
+- id: A065
+  section: "6.3"
+  rule: "A propose pass produces a draft, never an activation."
+  applies_to: asop
+  testable: true
+  violation: "The propose verb directly activates a new version."
+- id: A066
+  section: "6.4"
+  rule: "When the reviser is an agent, protected tags freeze a step against agents."
+  applies_to: revision
+  testable: true
+  violation: "An agent revision modifies a step tagged money or irreversible."
+- id: A067
+  section: "6.4"
+  rule: "A step tagged money or irreversible may not be changed by an agent."
+  applies_to: revision
+  testable: true
+  violation: "The system allows field mutations on protected-tagged steps by agents."
+- id: A068
+  section: "6.4"
+  rule: "An agent may not add or remove a protected tag."
+  applies_to: revision
+  testable: true
+  violation: "An agent revision alters the protected tag list."
+- id: A069
+  section: "6.4"
+  rule: "Classification ratchets toward human, never away."
+  applies_to: revision
+  testable: true
+  violation: "An agent moves a role or gate from human back to agent."
+- id: A070
+  section: "6.4"
+  rule: "An agent may move a role or a gate to human; only a human may move it back."
+  applies_to: revision
+  testable: true
+  violation: "An agent downgrades a human-assigned role or gate."
+- id: A071
+  section: "6.4"
+  rule: "An agent may not move any field into a state a human moved it away from, until a human moves it back."
+  applies_to: revision
+  testable: true
+  violation: "An agent reverts a field to a previous human-modified state without a subsequent human change."
+- id: A072
+  section: "6.4"
+  rule: "Who is human is declared by the operator and never inferred from a name."
+  applies_to: asop
+  testable: true
+  violation: "The system auto-classifies authors as human based on naming conventions."
+- id: A073
+  section: "6.4"
+  rule: "An undeclared registry polices everyone."
+  applies_to: asop
+  testable: true
+  violation: "The system allows unpoliced agent revisions when the human registry is empty."
+- id: A074
+  section: "6.4"
+  rule: "A human reviser is bound by none of the agent revision rules."
+  applies_to: revision
+  testable: true
+  violation: "The system incorrectly applies agent ratchet or protection rules to human revisions."
+- id: A075
+  section: "6.4"
+  rule: "Activation is policed the same way as revision, or the policy has a door beside it."
+  applies_to: revision
+  testable: true
+  violation: "Activation bypasses the revision policy checks or lacks a documented exception path."
+- id: A076
+  section: "6.5"
+  rule: "Promotion is refused when an active ASOP already covers the run's task_type."
+  applies_to: asop
+  testable: true
+  violation: "The system accepts a promotion that duplicates an existing active task_type."
+- id: A077
+  section: "6.5"
+  rule: "Activation of a promoted ASOP stays human."
+  applies_to: asop
+  testable: true
+  violation: "An agent or automated process activates a promoted ASOP."
+- id: A078
+  section: "7"
+  rule: "A plane never executes a check and never blocks a harness."
+  applies_to: asop
+  testable: true
+  violation: "The plane runs deterministic commands or halts harness execution."
+- id: A079
+  section: "7"
+  rule: "A plane stores ASOPs, versions them, records outcomes per version, routes human gates and adjudications, and runs the lessons pass across every harness that reports to it."
+  applies_to: asop
+  testable: true
+  violation: "The plane omits any of its mandated coordination, routing, or pass execution duties."
+- id: A080
+  section: "7"
+  rule: "A harness is conforming when it passes the conformance suite in this package against its own store."
+  applies_to: run
+  testable: true
+  violation: "The harness fails the suite's verb, refusal, status, or pin checks."
+- id: A081
+  section: "8.1"
+  rule: "sop_create requires fields valid, not empty, and bounds hold; refuses otherwise."
+  applies_to: asop
+  testable: true
+  violation: "The system accepts an empty, invalid, or out-of-bounds ASOP record."
+- id: A082
+  section: "8.1"
+  rule: "sop_revise requires source version exists; refuses otherwise."
+  applies_to: asop
+  testable: true
+  violation: "The system accepts a revise call against a non-existent version."
+- id: A083
+  section: "8.1"
+  rule: "sop_activate requires version is DRAFT; refuses otherwise."
+  applies_to: asop
+  testable: true
+  violation: "The system activates a version that is not in DRAFT status."
+- id: A084
+  section: "8.1"
+  rule: "sop_retire requires an active version exists; refuses otherwise."
+  applies_to: asop
+  testable: true
+  violation: "The system retires an ASOP with no active version."
+- id: A085
+  section: "8.2"
+  rule: "run requires version ACTIVE, inputs complete, and roles bindable; refuses otherwise."
+  applies_to: run
+  testable: true
+  violation: "The system files a run against a non-ACTIVE version, with missing inputs, or unbound roles."
+- id: A086
+  section: "8.3"
+  rule: "work_claim requires a binding eligible for the step's role and bead ready with no live lease; refuses otherwise."
+  applies_to: step
+  testable: true
+  violation: "The system grants a claim to an ineligible binding or a bead with an active lease."
+- id: A087
+  section: "8.3"
+  rule: "work_report requires attempt is current; refuses otherwise."
+  applies_to: step
+  testable: true
+  violation: "The system accepts a report against a stale or expired attempt number."
+- id: A088
+  section: "8.3"
+  rule: "work_attest requires bead reported; refuses otherwise."
+  applies_to: attestation
+  testable: true
+  violation: "The system stores an attestation for a bead that has not reported a result."
+- id: A089
+  section: "8.3"
+  rule: "verify_approve/reject requires bead is awaiting_verify; refuses otherwise."
+  applies_to: step
+  testable: true
+  violation: "The system accepts a verdict on a bead that is not in awaiting_verify status."
+- id: A090
+  section: "8.3"
+  rule: "repair requires bead is verify_failed; refuses otherwise."
+  applies_to: step
+  testable: true
+  violation: "The system files a repair bead for a step that is not verify_failed."
+- id: A091
+  section: "8.4"
+  rule: "adjudicate requires caller is anyone but the executor, bead executed, and none exists; refuses otherwise."
+  applies_to: step
+  testable: true
+  violation: "The system accepts an adjudication from the executor, for an unexecuted step, or a duplicate."
+- id: A092
+  section: "8.4"
+  rule: "propose requires unproposed adjudications exist; refuses otherwise."
+  applies_to: asop
+  testable: true
+  violation: "The system runs the propose pass when all adjudications are already proposed."
+- id: A093
+  section: "8.4"
+  rule: "promote requires run complete and no active ASOP for its task_type; refuses otherwise."
+  applies_to: asop
+  testable: true
+  violation: "The system promotes an incomplete run or duplicates an active task_type."
+- id: A094
+  section: "9"
+  rule: "Gate enforcement happens inside the domain that owns the bead, never in a shared plane."
+  applies_to: gate
+  testable: true
+  violation: "The plane performs gate validation or status flipping."
+- id: A095
+  section: "9"
+  rule: "A plane stays advisory and verifies attestations."
+  applies_to: attestation
+  testable: true
+  violation: "The plane executes checks or blocks harnesses instead of verifying attestations."
+- id: A096
+  section: "9"
+  rule: "Per gate, an implementation pins identity, environment, isolation, timeout, and idempotency."
+  applies_to: gate
+  testable: true
+  violation: "A gate execution lacks pinned identity, environment, isolation, timeout, or idempotency guarantees."
+- id: A097
+  section: "9"
+  rule: "Timeout is mandatory; expiry is failure, never a hang."
+  applies_to: gate
+  testable: true
+  violation: "A gate execution hangs indefinitely past its timeout without transitioning to failure."
+- id: A098
+  section: "9"
+  rule: "Re-running a passed gate is safe."
+  applies_to: gate
+  testable: true
+  violation: "Re-executing a passed gate alters state or causes side effects."
+- id: A099
+  section: "9"
+  rule: "Every human gate declares max_park_seconds and escalate_to."
+  applies_to: gate
+  testable: true
+  violation: "A human gate definition omits the park clock or escalation target."
+- id: A100
+  section: "9"
+  rule: "Silence past the deadline resolves by on_timeout."
+  applies_to: gate
+  testable: true
+  violation: "A parked human gate remains indefinitely without triggering the configured on_timeout action."
+- id: A101
+  section: "9"
+  rule: "Repair never substitutes for the work it repairs."
+  applies_to: step
+  testable: true
+  violation: "A repair bead replaces the original failed step instead of filing alongside it."
+- id: A102
+  section: "9"
+  rule: "Recursion is how the bound is honoured, not how it is broken."
+  applies_to: asop
+  testable: true
+  violation: "Nesting is used to bypass the 7-step or 3-depth decomposition limits."
