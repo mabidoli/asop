@@ -1,0 +1,244 @@
+# =============================================================================
+# ASOP record — the normative machine-readable schema.
+#
+# JSON Schema draft 2020-12, authored in YAML. References step.yaml (which
+# references gate.yaml) as siblings; relative $refs resolve against the $ids.
+#
+# This schema is FOR the artefact that makes a procedure a standard rather
+# than documentation: a versioned, ordered sequence of steps for one TYPE of
+# task, which two organisations can run with different role bindings and
+# still compare outcomes against, because outcomes are counted against the
+# same version (ASOP.md §1). The ASOP never enters a work queue — runs do; a
+# run pins (asop_id, version) and finishes under the version it started
+# under. "Did the rewrite of step 2 help?" is answered by counting, never by
+# recollection.
+#
+# This document describes the record as STORED and shared. At authoring time
+# (`sop_create`, §8.1) the store assigns the identity — a new asop_id at v1,
+# status `draft`, created_at — and the caller authors the body: title,
+# task_type, purpose, trigger, inputs, roles, constraints, steps. `revise`
+# never edits a version; it creates a new draft from an existing one.
+#
+# The decomposition bounds below are §3.1's and they are the discipline: a
+# procedure sized to what an accountable person can sanity-check. One that
+# needs more is usually two procedures — nest one (`uses`) instead.
+# =============================================================================
+
+$id: https://asop.dev/schemas/v1/asop.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: ASOP record
+description: >-
+  A versioned, ordered sequence of steps for one type of task: the shared
+  artefact whose version a run pins, whose gates are authored with it, and
+  whose per-version outcomes make revision an evidence question instead of a
+  taste question.
+
+type: object
+additionalProperties: false
+required:
+  - asop_id
+  - version
+  - title
+  - status
+  - steps
+
+properties:
+  asop_id:
+    description: >-
+      Stable identity across versions. An id alone is not a version; a pin is
+      both halves.
+    $ref: '#/$defs/nonBlankString'
+
+  version:
+    type: integer
+    minimum: 1
+    description: >-
+      Immutable once activated. `revise` creates a new version; it never
+      edits this one — that is what makes outcomes comparable across
+      revisions.
+
+  title:
+    description: What the procedure is called.
+    $ref: '#/$defs/nonBlankString'
+
+  status:
+    enum:
+      - draft       # being written; cannot be run; every field may change
+      - active      # exactly one per asop_id at a time; immutable; runs file from it
+      - superseded  # replaced by a later active version; kept forever — pins must stay resolvable
+      - retired     # withdrawn, no successor; human-only; kept like superseded
+    description: >-
+      Lifecycle (§4). Running a draft hands somebody a half-written
+      instruction with the authority of a published one, so filing refuses
+      it; superseded and retired records are kept because a run pinned to
+      them must stay resolvable or its outcomes become unreadable.
+
+  task_type:
+    description: >-
+      The type of task this standardises, as a free label. `promote` refuses
+      a second active ASOP for the same task_type; the path for a variant is
+      a new version via `revise` (§6.5).
+    $ref: '#/$defs/nonBlankString'
+
+  purpose:
+    description: What the procedure accomplishes, end to end.
+    $ref: '#/$defs/nonBlankString'
+
+  trigger:
+    description: >-
+      What situation calls for this procedure — declared on the ASOP, not on
+      a step: a procedure is triggered, a step is reached.
+    $ref: '#/$defs/nonBlankString'
+
+  inputs:
+    type: array
+    uniqueItems: true
+    items:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          description: >-
+            What a run must be given, by name; presence is checked at filing.
+          $ref: '#/$defs/nonBlankString'
+        description:
+          description: >-
+            What the input is, in the author's words — the contract checks
+            presence, not shape; what an input IS is between the author and
+            the harness.
+          $ref: '#/$defs/nonBlankString'
+        kind:
+          # The accept-everything schema: RESERVED, optional and unvalidated
+          # in v3 (§11.5). When a second harness disagrees with the first
+          # about the shape of an input, the disagreement can be named
+          # without a schema change; kinds get standardised from that
+          # evidence, not guessed now.
+          true
+      description: One named run input.
+    description: >-
+      What a run must be supplied. Names are unique (checked where the ASOP
+      is authored); `run` refuses when a declared input is missing.
+
+  roles:
+    type: object
+    propertyNames:
+      $ref: '#/$defs/nonBlankString'
+    additionalProperties:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind:
+          enum:
+            - agent   # filled by a binding the harness chooses at run time
+            - human   # a person fills it; its steps carry human gates by construction
+          description: >-
+            Who may fill the role. A human role's steps must gate `human` —
+            a human step an agent can close is not a human step (checked
+            where the ASOP is authored).
+    description: >-
+      The ASOP names ROLES, never agents, models, vendors or people (§3.6);
+      what fills each role is a harness decision at run time, which is what
+      makes the artefact shareable — two organisations run the same version
+      with different bindings and their outcomes still compare. Every step
+      role must be declared here.
+
+  constraints:
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required: [distinct]
+      properties:
+        distinct:
+          type: array
+          minItems: 2
+          uniqueItems: true
+          items:
+            $ref: '#/$defs/nonBlankString'
+          description: >-
+            Role names. The binding that fills one may not fill another IN
+            THE SAME RUN — separation of duties over bindings, not over
+            people. A harness that cannot satisfy a constraint refuses the
+            run; it does not quietly bind the same agent twice.
+    description: >-
+      Separation of duties over roles. One constraint is required by
+      construction and lives in the binding rules rather than this list: a
+      judged step is evaluated by a route distinct from the executor's, so a
+      validator over another step's output may not share that step's role.
+
+  steps:
+    type: array
+    minItems: 1
+    maxItems: 7
+    items:
+      $ref: 'step.yaml'
+    description: >-
+      The sequence, in order; each entry validates against step.yaml. An
+      ASOP with no steps is a title. Seven at one level is the §3.1 bound —
+      a human review bound, not an engineering one. Depth (nesting via
+      `uses`) is bounded at 3 where the run tree is filed, because it is the
+      tree that nests, not the record.
+
+  author:
+    description: Who wrote this version.
+    $ref: '#/$defs/nonBlankString'
+
+  author_kind:
+    enum: [human, agent]
+    description: >-
+      Set by the operator, never inferred from a name. The revision policy's
+      rules compute from this field, which is why it exists: versions are
+      immutable and each records who authored it, so "an agent may not undo a
+      human" is computable rather than aspirational (§6.4).
+
+  proposals:
+    type: array
+    uniqueItems: true
+    items:
+      $ref: '#/$defs/nonBlankString'
+    description: >-
+      Open revision proposals carried until the next reviser addresses or
+      dismisses them. A proposal is a draft, never an activation.
+
+  superseded_by:
+    type: [integer, 'null']
+    minimum: 1
+    description: >-
+      The version that replaced this one, once one does. Kept rather than
+      deleted; null (or absent) until then, as in the published example
+      record.
+
+  created_at:
+    type: string
+    format: date-time
+    description: When this version was created.
+
+# ---------------------------------------------------------------------------
+# Cross-record rules JSON Schema cannot express. Every conforming
+# implementation enforces these where the record is authored (`sop_create`)
+# or a run is filed (`run`); they are listed here because adopters read
+# schemas to learn intent, and each names its refusal code (§10).
+# ---------------------------------------------------------------------------
+x-asop-cross-checks:
+  rules:
+    - {check: "a step's `role` is declared in `roles`", refusal: "sop_refused"}
+    - {check: "a role of kind `human` gates its steps `human`", refusal: "sop_refused"}
+    - {check: "a step carrying a protected tag (`money`, `irreversible` by default) gates `human` — the tag means a person looks before the step counts as done", refusal: "sop_refused"}
+    - {check: "a `judged` step's role differs from the role of every step it is `after` — the judge is a route distinct from the executor's", refusal: "sop_refused"}
+    - {check: "`after` names only existing, lower-numbered steps; no cycles", refusal: "sop_refused"}
+    - {check: "each step's declared `step` number equals its array position", refusal: "sop_refused"}
+    - {check: "`inputs` names are unique", refusal: "sop_refused"}
+    - {check: "`constraints[].distinct` names only declared roles", refusal: "sop_refused"}
+    - {check: "at filing: the pinned version is ACTIVE", refusal: "sop_refused"}
+    - {check: "at filing: every declared input is supplied", refusal: "inputs_missing"}
+    - {check: "at filing: every role resolves to a binding satisfying every constraint", refusal: "role_unbound | constraint_unsatisfiable"}
+    - {check: "the filed run tree nests at most 3 deep (width is bounded by the step count)", refusal: "decomposition_bound"}
+
+$defs:
+  # See gate.yaml: presence means valued, and blank is not a value.
+  nonBlankString:
+    type: string
+    minLength: 1
+    pattern: '\S'

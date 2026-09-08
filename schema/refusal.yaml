@@ -1,0 +1,66 @@
+# =============================================================================
+# ASOP refusal — the normative machine-readable schema.
+#
+# JSON Schema draft 2020-12, authored in YAML. Standalone: no $refs outside
+# this file.
+#
+# A refusal is FOR telling a caller, in the contract's own error language,
+# that a request was declined (ASOP.md §10): a stable code clients branch on,
+# a human sentence, and no stack trace. It is the one error type every plane
+# and harness in this contract speaks, so a caller never has to know which
+# side of the contract produced it.
+#
+# This file fixes the SHAPE only. WHICH codes exist — the vocabulary — is
+# specified in ASOP.md §10 and triaged separately, so that a new code cannot
+# be added without a code, a message and a remediation.
+#
+# Transport-neutral (§8): how a refusal maps onto HTTP or MCP is the
+# transport's mapping, not the record's business.
+# =============================================================================
+
+$id: https://asop.dev/schemas/v1/refusal.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: ASOP refusal
+description: >-
+  The shape of a declined request: a stable machine code, a human message,
+  and a remediation sentence.
+
+type: object
+additionalProperties: false
+required:
+  - code
+  - message
+  - remediation
+
+properties:
+  code:
+    type: string
+    pattern: '^[a-z][a-z0-9_]*(:[a-z0-9_-]+)?$'
+    description: >-
+      Stable and greppable; clients branch on it, so a code never changes
+      meaning under an existing name. The optional `:suffix` carries the one
+      parameterised family in the vocabulary — `revision_policy:ratchet`
+      names WHICH rule fired, because "a policy rule" is not something a
+      caller can fix. A family with parameters either fits this pattern or
+      revises it deliberately; it does not smuggle parameters into `message`.
+
+  message:
+    description: >-
+      One human sentence saying what was declined and why. No stack trace —
+      a refusal is a decision, not a crash.
+    $ref: '#/$defs/nonBlankString'
+
+  remediation:
+    description: >-
+      A complete sentence addressed to the caller, naming the next action.
+      Not decoration: the caller of a contract boundary is usually an agent
+      that will either fix the payload or stop calling, and which one it does
+      depends entirely on whether the refusal named the next action.
+    $ref: '#/$defs/nonBlankString'
+
+$defs:
+  # See gate.yaml: presence means valued, and blank is not a value.
+  nonBlankString:
+    type: string
+    minLength: 1
+    pattern: '\S'

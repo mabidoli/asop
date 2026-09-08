@@ -1,0 +1,82 @@
+# =============================================================================
+# ASOP attestation — the normative machine-readable schema.
+#
+# JSON Schema draft 2020-12, authored in YAML. Standalone: no $refs outside
+# this file.
+#
+# An attestation is FOR carrying the evidence of a completed gate across a
+# trust boundary (ASOP.md §5.3): where the store that owns the bead and the
+# plane that records outcomes are different trust domains, the executing
+# domain submits this record and the plane verifies and stores the claim. It
+# does not run commands.
+#
+# The record is honest about its weakest form: a `deterministic` gate's
+# attestation names the executor, and every reader of it knows that is a
+# claim, not a proof — which is why the other gate kinds exist (§2.2). A
+# `judged` or `human` gate's attestation names the judge or the person.
+# =============================================================================
+
+$id: https://asop.dev/schemas/v1/attestation.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: ASOP attestation
+description: >-
+  The evidence a completed gate carries: what ran, its result, who attested,
+  and when. Submitted by the executing domain to a plane, which verifies and
+  stores the claim — never executes it.
+
+type: object
+# Anything else belongs in the work item's result, not in the evidence.
+additionalProperties: false
+required:
+  - check
+  - exit_status
+  - environment
+  - at
+  - submitted_by
+
+properties:
+  check:
+    description: >-
+      The command that was re-run, exactly as the gate declares it. The plane
+      refuses an attestation about any other command: evidence about a
+      different command is not evidence about this unit of work, and
+      accepting one is how a green report gets produced by running something
+      easier. (Equality with the gate's `check` is a cross-record rule,
+      enforced where the attestation is submitted, not here.)
+    $ref: '#/$defs/nonBlankString'
+
+  exit_status:
+    type: integer
+    description: >-
+      The process's actual exit status. Passing means exit_status == 0 and
+      nothing else — the one place that convention is stated. A boolean here
+      would make "it passed" an opinion rather than an observation.
+
+  environment:
+    description: >-
+      A fingerprint of where the check ran — machine, image or runtime. An
+      attestation nobody can reproduce cannot be disputed either; this field
+      is what keeps a stored claim arguable.
+    $ref: '#/$defs/nonBlankString'
+
+  at:
+    type: string
+    format: date-time
+    description: >-
+      When the check ran, ISO-8601. Without it a stale attestation is
+      indistinguishable from a fresh one.
+
+  submitted_by:
+    description: >-
+      Who attests. Set by the transport from the AUTHENTICATED actor, never
+      copied from a body that claims otherwise — the plane records who
+      actually called, not who the call says it is. A claim whose author can
+      be forged is not evidence.
+    $ref: '#/$defs/nonBlankString'
+
+$defs:
+  # See gate.yaml: presence means valued, and blank is not a value.
+  nonBlankString:
+    type: string
+    minLength: 1
+    pattern: '\S'

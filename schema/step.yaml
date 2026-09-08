@@ -1,0 +1,228 @@
+# =============================================================================
+# ASOP step — the normative machine-readable schema.
+#
+# JSON Schema draft 2020-12, authored in YAML. See gate.yaml for the format
+# rationale; this file references it as a sibling (`gate.yaml`).
+#
+# A step is FOR being one unit of the sequence an ASOP standardises: what
+# must be done, what must be true before starting, how the result is proven,
+# where the result is written, and which ROLE does it (ASOP.md §3.2). It is
+# what v2 called the procedure. A step has no version of its own — the ASOP
+# is versioned and a bead pins (asop_id, version, step) — and no status;
+# runs do.
+#
+# Two prose fields are kept distinct ON PURPOSE, because collapsing them is
+# how "done" comes to mean "I believe I finished" (§3.2):
+#
+#   definition_of_done — what is being CLAIMED.
+#   validation         — the check that would FAIL if the claim were false.
+#
+# Three things JSON Schema cannot say about a step, which every conforming
+# implementation enforces where the step is authored (`sop_create`, §3.4):
+#
+#   * `after` names only steps that exist and are LOWER-numbered — that is
+#     what makes a cycle impossible by construction rather than by search.
+#   * `step` is the step's 1-based position in the ASOP's `steps` array; a
+#     declared number that disagrees with the position is refused.
+#   * `role` names a role the ASOP declares (asop.yaml cross-check), and a
+#     `judged` step may not share its role with a step whose output it is
+#     `after` — the judge must be a route distinct from the executor's.
+# =============================================================================
+
+$id: https://asop.dev/schemas/v1/step.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: ASOP step
+description: >-
+  One unit of an ASOP: text, gate, role, order. The gate is authored HERE,
+  with the version — a step with no gate is advice, not a step — and a run
+  supplies none.
+
+type: object
+additionalProperties: false
+required:
+  - step
+  - name
+
+properties:
+  step:
+    type: integer
+    minimum: 1
+    description: >-
+      The step's 1-based position in the ASOP's `steps` array — also the
+      third component of the pin a work bead carries. Must equal the array
+      position; the position is the number.
+
+  name:
+    description: >-
+      A short identifier for the step. Revisions are keyed by name across
+      versions when names are unique within a version, and fall back to
+      position when they are not — so keep them unique, and a human's edit to
+      one step never reads as a rewrite of another.
+    $ref: '#/$defs/nonBlankString'
+
+  role:
+    description: >-
+      Who does this step, as a ROLE the ASOP declares — never an agent, a
+      model, a vendor or a person; what fills the role is a harness decision
+      at run time (§3.6, §7). Required unless the step is nested (`uses`).
+    $ref: '#/$defs/nonBlankString'
+
+  # ---- the step's prose, in the order it is READ ----------------------------
+
+  purpose:
+    description: Why the step exists, in the procedure's own words.
+    $ref: '#/$defs/nonBlankString'
+
+  entry_check:
+    description: >-
+      What must be true and in hand BEFORE starting, phrased so a missing
+      item becomes a question to ask rather than an assumption to make.
+    $ref: '#/$defs/nonBlankString'
+
+  inputs:
+    description: >-
+      What this step consumes — the run's inputs and the write_backs of the
+      steps it is `after`.
+    $ref: '#/$defs/nonBlankString'
+
+  definition_of_done:
+    description: What is being CLAIMED when the step says done.
+    $ref: '#/$defs/nonBlankString'
+
+  validation:
+    description: >-
+      The check that would FAIL if the claim above were false. Distinct from
+      `definition_of_done` on purpose — see the header comment.
+    $ref: '#/$defs/nonBlankString'
+
+  write_back:
+    description: >-
+      Where the outcome lands, and for whom: the half of a handoff that gets
+      dropped, and the half the next step's `entry_check` is written against.
+    $ref: '#/$defs/nonBlankString'
+
+  # ---- the accumulated evidence ---------------------------------------------
+
+  common_mistakes:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      $ref: '#/$defs/nonBlankString'
+    description: >-
+      The failure modes that actually bite, one entry each, grown from `bad`
+      adjudications (§6.3). Present-but-empty is refused: an empty list is
+      the claim that this work has no known failure modes, which is the one
+      claim a handoff should never make silently — omit the key until
+      adjudications give it entries.
+
+  tags:
+    type: array
+    uniqueItems: true
+    items:
+      type: string
+      pattern: '^[a-z0-9][a-z0-9_-]*$'
+    description: >-
+      Lower-cased labels, one spelling each. Protected tags (`money`,
+      `irreversible` by default — a registry may add to the set, never reduce
+      it) freeze the step against agent revision and force a `human` gate:
+      the tag means a person looks before the step counts as done. Matching
+      must not turn on capitalisation — `Money` is not a way past a rule
+      written for `money` — so the canonical spelling is fixed here.
+
+  proposals:
+    type: array
+    uniqueItems: true
+    items:
+      $ref: '#/$defs/nonBlankString'
+    description: >-
+      Open revision proposals, one per `good` adjudication — the procedure
+      was wrong here, and this is the evidence. Carried until the reviser of
+      the next version addresses or dismisses them.
+
+  # ---- the proof and the order ----------------------------------------------
+
+  gate:
+    $ref: 'gate.yaml'
+    description: >-
+      How this step proves it is done — the gate schema, sibling file
+      gate.yaml. Required unless the step is nested (`uses`), because the
+      inner ASOP's gates are the inner ASOP's.
+
+  after:
+    type: array
+    uniqueItems: true
+    items:
+      type: integer
+      minimum: 1
+    description: >-
+      Ordering by step number. Steps are a sequence by default — step n is
+      `after: [n-1]` — and a step declares `after` explicitly to run in
+      parallel with siblings; the filed tree carries it as `blocked_by`
+      (§3.4). Entries must name existing, lower-numbered steps only, which
+      is what makes a cycle impossible by construction; enforced where the
+      ASOP is authored, since a schema cannot compare a value to its sibling.
+
+  uses:
+    type: object
+    additionalProperties: false
+    required: [asop_id, version]
+    properties:
+      asop_id:
+        description: The inner ASOP's stable identity.
+        $ref: '#/$defs/nonBlankString'
+      version:
+        type: integer
+        minimum: 1
+        description: >-
+          The inner version, pinned exactly as a run pins one. A later
+          version does not reach into a filed tree.
+    description: >-
+      A step that IS another ASOP (§3.5): `{asop_id, version}` in place of a
+      body. Filing it files the inner ASOP's tree as this step's children,
+      pinned to the inner version; depth counts against the 3-deep bound. It
+      carries no body of its own — the inner ASOP's steps, gates and roles
+      are the inner ASOP's. (That settles §3.5's "the outer step's gate, if
+      any" in the stricter direction: two gates over one unit of work means
+      two parties can disagree about done.)
+
+allOf:
+  # ---- a nested step carries no body of its own ------------------------------
+  - if:
+      required: [uses]
+    then:
+      not:
+        anyOf:
+          - {required: [role]}
+          - {required: [gate]}
+          - {required: [purpose]}
+          - {required: [entry_check]}
+          - {required: [inputs]}
+          - {required: [definition_of_done]}
+          - {required: [validation]}
+          - {required: [write_back]}
+          - {required: [common_mistakes]}
+
+  # ---- a step that is not nested names its role, carries its gate, and says --
+  # ---- something -------------------------------------------------------------
+  # A step with no gate is advice; a step that says nothing hands its
+  # executor nothing. At least one text field, every time.
+  - if:
+      not:
+        required: [uses]
+    then:
+      required: [role, gate]
+      anyOf:
+        - {required: [purpose]}
+        - {required: [entry_check]}
+        - {required: [inputs]}
+        - {required: [definition_of_done]}
+        - {required: [validation]}
+        - {required: [write_back]}
+
+$defs:
+  # See gate.yaml: presence means valued, and blank is not a value.
+  nonBlankString:
+    type: string
+    minLength: 1
+    pattern: '\S'

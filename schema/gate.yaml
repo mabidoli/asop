@@ -1,0 +1,243 @@
+# =============================================================================
+# ASOP gate — the normative machine-readable schema.
+#
+# Vocabulary: JSON Schema draft 2020-12. Syntax: YAML, which is a superset of
+# JSON — this file is a YAML document and, once parsed, an ordinary JSON
+# Schema every language already has a validator for.
+#
+# A gate is FOR answering, machine-checkably, "how does this step prove it is
+# done?" (ASOP.md §2.2). It is authored by the procedure's author, travels
+# inside the version, and is enforced where completion is recorded — never
+# supplied by whoever files or executes the work (§3.3). A run supplies none,
+# and a harness that lets a filer or executor override a step's gate is not
+# conforming. A run whose step cannot pass its gate did not complete that
+# step, whatever the transcript says.
+#
+# Three field groups, because they answer three different questions:
+#
+#   core      — always required: `kind`, and exactly one of `check` (one
+#               command) or `checks` (an ordered, staged ladder that stops at
+#               the first failure and names which stage broke, rather than
+#               one opaque `&&`-chained command that only says pass or fail).
+#   clock     — the park clock: how long the gate may sit unanswered before
+#               `on_timeout` decides its fate, and who a `human` gate is
+#               addressed to. Declared all-or-nothing; see the allOf below.
+#   execution — hints to the executing domain: `cwd`, `timeout_s`, and, for
+#               a `judged` gate, `rubric` and `judge_route`.
+#
+# Whether the clock group is MANDATORY is a caller decision, not a schema
+# one: a coordination plane requires it, because a parked gate it cannot
+# expire is a queue it cannot drain; a runtime may relax it for deterministic
+# gates that cannot park. This document states the shape; registries state
+# their own mandate (§3.3).
+#
+# Deliberately absent: `class`. It was a second name for `kind` left over
+# from merging two implementations that had grown the same axis apart, and a
+# standard's first published schema does not ship two names for one field.
+# Records that say `class` are that merge's readership problem — rewrite them
+# to `kind`.
+#
+# Presence means valued. There are no nullable fields here: absent means
+# absent. An implementation that normalises absent fields to explicit nulls
+# must drop the nulls before validating.
+# =============================================================================
+
+$id: https://asop.dev/schemas/v1/gate.yaml
+# The schema family's canonical home. The five files of this family resolve
+# relative $refs against these $ids, whether served or read from disk; if the
+# published home differs, this line is the one to change in each file.
+$schema: https://json-schema.org/draft/2020-12/schema
+title: ASOP gate
+description: >-
+  The proof a step carries that it is done — a command the completing process
+  re-runs, a rubric judged by a route other than the executor's, or a named
+  person's acknowledgement — plus the park clock that keeps a parked gate from
+  being a deadlock. Part of the ASOP standard (ASOP.md §3.3): authored with
+  the version, immutable to whoever executes or files the work.
+
+type: object
+# An unknown key is refused rather than ignored, here and throughout: it is
+# overwhelmingly a typo, and a typo'd gate is a check that never runs and
+# still reports green — worse than no gate at all.
+additionalProperties: false
+required:
+  - kind
+
+properties:
+  kind:
+    enum:
+      - deterministic
+      - judged
+      - human
+    description: >-
+      deterministic: machine-checkable; re-run fresh by the completing
+      process, which is therefore its own attester — a trust floor, not a
+      proof. judged: evaluated against a rubric fixed at authoring time by a
+      route different from the executor's — no self-grading. human: a named
+      person acknowledges and the work parks until they do — for irreversible
+      or outward-facing steps.
+
+  check:
+    description: >-
+      One command or criterion: for a deterministic gate, the command to
+      re-run; for a judged or human one, the criteria applied. Exactly one of
+      `check` / `checks` (see allOf).
+    $ref: '#/$defs/nonBlankString'
+
+  checks:
+    type: array
+    minItems: 1
+    items:
+      $ref: '#/$defs/nonBlankString'
+    description: >-
+      The staged form of `check`: an ordered ladder (lint, types, unit,
+      integration) re-run in order, stopping at the first failure and naming
+      which stage broke. A gate with no stages passes everything, which is
+      not a gate.
+
+  # ---- clock group ----------------------------------------------------------
+
+  max_park_seconds:
+    type: integer
+    minimum: 1
+    description: >-
+      How long this gate may sit unverified, in seconds, before its
+      `on_timeout` resolution applies. No ceiling is fixed here: "thirty
+      days" is a registry's decision about itself, not a property of what a
+      gate is.
+
+  on_timeout:
+    enum:
+      - pass
+      - fail
+      - escalate
+    description: >-
+      What happens to the work when the park clock expires and nobody
+      verified: pass, fail, or escalate to `escalate_to`. There is
+      deliberately no default — a library-level guess here silently passes or
+      silently fails somebody else's release. Silence past the deadline
+      resolves by this field: decided by omission is an outcome; an ignored
+      queue is not.
+
+  escalate_to:
+    description: >-
+      Where an escalation goes. A different question than `verifier`: that is
+      who is supposed to answer the gate, this is where the decision lands
+      when nobody did. Often the same person, never the same field —
+      conflating them is how a gate that resolved on its own clock got routed
+      to nobody at all.
+    $ref: '#/$defs/nonBlankString'
+
+  verifier:
+    description: >-
+      Who answers a human gate — the person expected to sign it off. Without
+      a verifier the routed work has no assignee and requires no capability,
+      so the queue offers it to the executor: the one party a human gate
+      exists to exclude.
+    $ref: '#/$defs/nonBlankString'
+
+  # ---- execution group (hints to the executing domain) ----------------------
+
+  cwd:
+    description: The directory the check runs from.
+    $ref: '#/$defs/nonBlankString'
+
+  timeout_s:
+    type: integer
+    minimum: 1
+    description: >-
+      Per-command budget, in seconds, for actually running the check. §9's
+      execution contract makes a bounded runtime mandatory for deterministic
+      checks at execution time — expiry is failure, never a hang; this field
+      records it in the artefact as the hint §3.3 defines it as.
+
+  rubric:
+    description: What a judge weighs. Read only by a judged gate; see allOf.
+    $ref: '#/$defs/nonBlankString'
+
+  judge_route:
+    description: >-
+      Where the judgment happens. Read only by a judged gate; see allOf. The
+      route must be DISTINCT from the executor's — that is a run-time binding
+      rule (§3.6, §7), checked where roles bind, not expressible in this
+      artefact.
+    $ref: '#/$defs/nonBlankString'
+
+allOf:
+  # ---- core: `kind`, and exactly one of `check` / `checks` ------------------
+  # oneOf does the whole job: both present -> both branches match -> refused;
+  # neither -> no branch matches -> refused. A gate declaring both looks
+  # staged while only one of the two would ever be read.
+  - oneOf:
+      - required: [check]
+      - required: [checks]
+
+  # ---- clock: all-or-nothing as a group -------------------------------------
+  # A half-declared park clock parks forever by omission rather than by
+  # anyone's decision: max_park_seconds with no on_timeout is a bug that will
+  # not reproduce. Declare the clock or don't.
+  - if:
+      anyOf:
+        - required: [max_park_seconds]
+        - required: [on_timeout]
+        - required: [escalate_to]
+        - required: [verifier]
+    then:
+      required: [max_park_seconds, on_timeout]
+
+  # ---- clock internals: escalate has a destination, and only escalate does --
+  # An escalation with nowhere to go is indistinguishable from parking forever.
+  - if:
+      required: [on_timeout]
+      properties:
+        on_timeout: {const: escalate}
+    then:
+      required: [escalate_to]
+  # escalate_to under any other on_timeout is a field nothing would ever
+  # read — two readers of this gate would disagree about what it means.
+  - if:
+      required: [escalate_to]
+    then:
+      properties:
+        on_timeout: {const: escalate}
+
+  # ---- verifier follows kind ------------------------------------------------
+  # A human gate names who answers it — see `verifier` above.
+  - if:
+      required: [kind]
+      properties:
+        kind: {const: human}
+    then:
+      required: [verifier]
+  # A deterministic check is re-run by the process that completed the work;
+  # naming somebody else here promises a review that never happens. (A judged
+  # gate MAY name one: who adjudicates is declared, never inferred.)
+  - if:
+      required: [kind]
+      properties:
+        kind: {const: deterministic}
+    then:
+      not:
+        required: [verifier]
+
+  # ---- judged-only execution fields -----------------------------------------
+  # A field nobody reads is not documentation, it is a promise the gate does
+  # not keep: a deterministic check is re-run by the completing process, and
+  # a human gate is answered by the named verifier's own judgement. Neither
+  # reads a rubric, and only a judged gate is routed to a judge at all.
+  - if:
+      anyOf:
+        - required: [rubric]
+        - required: [judge_route]
+    then:
+      properties:
+        kind: {const: judged}
+
+$defs:
+  # A present-but-blank field claims to answer a question it does not answer;
+  # omit the key instead. `\S` = contains a non-whitespace character, so "   "
+  # is not a value.
+  nonBlankString:
+    type: string
+    minLength: 1
+    pattern: '\S'
