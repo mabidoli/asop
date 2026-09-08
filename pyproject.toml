@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "asop-spec"
-version = "0.1.0"
+version = "0.2.0"
 description = "The ASOP contract — shared gate schema, refusal vocabulary, and SOP record shape for any plane or harness that speaks it"
 readme = "README.md"
 requires-python = ">=3.11"

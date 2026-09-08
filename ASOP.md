@@ -5,7 +5,9 @@
 > other than the one that did the work, and revised from the evidence its own
 > runs produce.*
 
-**Status:** v3 — all seven review questions decided 2026-09-04 (§11). Supersedes v2.
+**Status:** v3.1 — v3's seven review questions (§11) stand as decided 2026-09-04;
+v3.1 is corrections and the conformance layer ([`CHANGELOG.md`](CHANGELOG.md)).
+Supersedes v2.
 **Home:** this repository — the specification, its normative [schema](schema/v1/), its
 [conformance vectors](conformance/) and a reference implementation. Distributed as
 `asop-spec`, importable as `asop`; a plane or a harness adopts it by version, not by path.
