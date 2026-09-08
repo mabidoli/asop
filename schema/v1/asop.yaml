@@ -24,7 +24,7 @@
 # needs more is usually two procedures — nest one (`uses`) instead.
 # =============================================================================
 
-$id: https://asop.dev/schemas/v1/asop.yaml
+$id: https://raw.githubusercontent.com/mabidoli/asop/main/schema/v1/asop.yaml
 $schema: https://json-schema.org/draft/2020-12/schema
 title: ASOP record
 description: >-

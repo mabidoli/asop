@@ -18,7 +18,7 @@
 # transport's mapping, not the record's business.
 # =============================================================================
 
-$id: https://asop.dev/schemas/v1/refusal.yaml
+$id: https://raw.githubusercontent.com/mabidoli/asop/main/schema/v1/refusal.yaml
 $schema: https://json-schema.org/draft/2020-12/schema
 title: ASOP refusal
 description: >-

@@ -16,7 +16,7 @@
 # `judged` or `human` gate's attestation names the judge or the person.
 # =============================================================================
 
-$id: https://asop.dev/schemas/v1/attestation.yaml
+$id: https://raw.githubusercontent.com/mabidoli/asop/main/schema/v1/attestation.yaml
 $schema: https://json-schema.org/draft/2020-12/schema
 title: ASOP attestation
 description: >-

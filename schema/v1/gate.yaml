@@ -42,7 +42,7 @@
 # must drop the nulls before validating.
 # =============================================================================
 
-$id: https://asop.dev/schemas/v1/gate.yaml
+$id: https://raw.githubusercontent.com/mabidoli/asop/main/schema/v1/gate.yaml
 # The schema family's canonical home. The five files of this family resolve
 # relative $refs against these $ids, whether served or read from disk; if the
 # published home differs, this line is the one to change in each file.
