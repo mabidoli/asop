@@ -70,6 +70,7 @@ vectors:
     document: {kind: deterministic, check: "npm test", max_park_seconds: 3600, on_timeout: escalate}
     expect: refuse
     refusal: gate_invalid
+    reaches: "escalate"
     because: "escalating to nobody is a deadlock wearing a plan"
 
   - id: gate-refuse-not-an-object
@@ -91,6 +92,7 @@ vectors:
     document: {kind: deterministic}
     expect: refuse
     refusal: gate_invalid
+    reaches: "neither 'check' nor 'checks'"
     because: "a gate with nothing to run cannot refuse anything"
 
   - id: gate-refuse-both-check-and-checks
@@ -102,10 +104,28 @@ vectors:
 
   - id: gate-refuse-verifier-on-deterministic
     asserts: [A007]
+    document: {kind: deterministic, check: "pytest -q", max_park_seconds: 3600, on_timeout: pass, verifier: "dana"}
+    expect: refuse
+    refusal: gate_invalid
+    reaches: "verifier is set on a deterministic gate"
+    because: >-
+      A command exiting zero is not a person's judgement; naming a verifier
+      implies review that never happens. The clock is declared COMPLETELY here on
+      purpose: verifier is itself a clock field, so the shorter document trips
+      the all-or-nothing clock rule first and this rule is never reached. Found
+      by coverage audit 2026-09-08 — the vector was green and testing something
+      else.
+
+  - id: gate-refuse-lone-verifier-is-a-partial-clock
+    asserts: [A009]
     document: {kind: deterministic, check: "pytest -q", verifier: "dana"}
     expect: refuse
     refusal: gate_invalid
-    because: "a command exiting zero is not a person's judgement; naming one implies review that never happens"
+    reaches: "part of its park clock"
+    because: >-
+      The document the previous vector used to send, kept because it is a real
+      case with a different cause: a lone verifier is a partial clock, refused
+      before any kind-specific rule runs.
 
   - id: gate-refuse-rubric-on-deterministic
     asserts: [A007]
@@ -116,16 +136,30 @@ vectors:
 
   - id: gate-refuse-human-without-verifier
     asserts: [A007]
+    document: {kind: human, check: "approve the release", max_park_seconds: 3600, on_timeout: fail}
+    expect: refuse
+    refusal: gate_invalid
+    reaches: "must name the person who answers it"
+    because: >-
+      A human gate nobody is named on is a gate nobody answers. The check and the
+      complete clock are present so this rule is actually reached: the bare
+      {kind: human} document is refused earlier for having no check at all, which
+      is what this vector used to test by accident.
+
+  - id: gate-refuse-human-with-nothing-at-all
+    asserts: [A007]
     document: {kind: human}
     expect: refuse
     refusal: gate_invalid
-    because: "a human gate nobody is named on is a gate nobody answers"
+    reaches: "neither 'check' nor 'checks'"
+    because: "the bare document, kept as its own case: refused for having no check, before the verifier rule is consulted"
 
   - id: gate-refuse-partial-clock
     asserts: [A009]
     document: {kind: deterministic, check: "pytest -q", max_park_seconds: 3600}
     expect: refuse
     refusal: gate_invalid
+    reaches: "part of its park clock"
     because: "the clock is declared as a whole or not at all; a timeout with no action is a deadlock with a number on it"
 
   - id: gate-refuse-unknown-field

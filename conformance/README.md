@@ -65,6 +65,39 @@ Stated here because a suite that hides its own coverage is worse than a small on
   that passing proves the rules exercised here and nothing beyond them.
 - **Only refusal codes are compared, not messages.** Two implementations may
   refuse the same document for different stated reasons.
+- **3 of the 102 assertions are cited by a vector.** The other 99 are all
+  `testable: true`. 88 of them need artifact types the runner does not have yet —
+  an `asop` record, a `step`, a `revision` changeset — so the honest number for
+  what is coverable today is smaller than the gap looks.
+- **21 refusal sites in the reference implementation are unreachable by any
+  vector**, including the `class` read alias, `checks: []`, `checks` as a bare
+  string, `schema_version` mismatch, and every `on_timeout` value error.
+- **2 refusal sites cannot be reached by the vector FORMAT at all**: the caller's
+  `require=("clock",)` option and the park-clock ceiling have no field to express
+  them. That is a format gap, not a coverage gap.
+
+## `reaches` — pinning which rule fired
+
+One refusal code covers many rules; `gate_invalid` alone guards 38 of them. So
+comparing codes cannot tell whether a vector reached the rule its `because`
+claims. Two vectors were found green while testing a different rule entirely, and
+nothing in the suite could have caught it.
+
+An optional `reaches` field names a substring the refusal message must contain:
+
+```yaml
+  - id: gate-refuse-verifier-on-deterministic
+    document: {kind: deterministic, check: "pytest -q", max_park_seconds: 3600, on_timeout: pass, verifier: "dana"}
+    expect: refuse
+    refusal: gate_invalid
+    reaches: "verifier is set on a deterministic gate"
+```
+
+**It is non-normative.** A conforming implementation is not required to match
+these strings — its wording is its own, and demanding otherwise would make English
+part of the contract. The reference runner checks them because it is the
+implementation whose messages they quote, and because a vector that silently
+drifts onto a different rule is worse than a missing one.
 
 ## Adding a vector
 

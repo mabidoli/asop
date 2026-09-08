@@ -29,6 +29,7 @@ SUBMITTER = "conformance-runner"
 
 def run_one(artifact: str, vector: dict) -> tuple[bool, str]:
     """Return (matched, what actually happened)."""
+    detail_message = ""
     try:
         if artifact == "gate":
             validate_gate(vector["document"])
@@ -56,6 +57,7 @@ def run_one(artifact: str, vector: dict) -> tuple[bool, str]:
         got, code = "accept", None
     except Refusal as refusal:
         got, code = "refuse", refusal.code
+        detail_message = refusal.message
     except Exception as exc:  # a crash is not a refusal, and must not read as one
         return False, f"raised {type(exc).__name__}: {exc}"
 
@@ -64,6 +66,24 @@ def run_one(artifact: str, vector: dict) -> tuple[bool, str]:
         return False, f"expected {want}, got {got}" + (f" ({code})" if code else "")
     if want == "refuse" and vector.get("refusal") and code != vector["refusal"]:
         return False, f"refused with {code!r}, vector requires {vector['refusal']!r}"
+
+    # `reaches` is NON-NORMATIVE and deliberately so. One refusal code covers
+    # many distinct rules — gate_invalid alone guards 38 of them — so comparing
+    # codes cannot tell whether a vector reached the rule it names. Two vectors
+    # were found green while testing a rule other than the one their `because`
+    # described, and nothing in the suite could have caught it.
+    #
+    # A conforming implementation is NOT required to match these strings: its
+    # wording is its own. The reference runner checks them because it is the
+    # implementation whose messages they quote, and because a vector that
+    # silently drifts onto a different rule is worse than a missing one.
+    if reaches := vector.get("reaches"):
+        message = detail_message or ""
+        if reaches.lower() not in message.lower():
+            return False, (
+                f"refused correctly with {code!r}, but reached the wrong rule: "
+                f"expected a message containing {reaches!r}, got {message[:70]!r}"
+            )
     return True, got if not code else f"{got} ({code})"
 
 
