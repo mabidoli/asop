@@ -13,7 +13,7 @@
 #   testable    can a document alone prove or violate it
 #   violation   what a document that breaks the rule looks like
 #
-# Extracted 2026-09-07 and checked: 102 unique ids, no missing fields, every
+# Extracted 2026-09-07 and checked: 107 unique ids, no missing fields, every
 # applies_to in vocabulary, all 25 cited sections resolve to real headings in
 # ASOP.md, no near-duplicate rules.
 #
@@ -39,8 +39,9 @@
 # attestation per rung, each pinned to its index, and is answered only when
 # every rung is present and passing. Added because the feature was previously
 # unusable: a staged gate normalised to `check: None` and refused every
-# possible attestation. Assertions covering it are not yet extracted; the next
-# extraction pass should pick them up from ASOP.md 2.2.
+# possible attestation. Extracted 2026-09-08 as A103-A107; the ids are appended
+# rather than renumbered into sequence, because a vector cites an id and an id
+# that moves is worse than an id out of order.
 
 
 - id: A001
@@ -97,6 +98,36 @@
   applies_to: gate
   testable: true
   violation: "A gate declaring some clock fields but not the rest; or a caller requiring the clock group accepting a gate that omits it."
+- id: A103
+  section: "2.2"
+  rule: "A gate may declare a single `check` or an ordered ladder of `checks`."
+  applies_to: gate
+  testable: true
+  violation: "A gate declaring an ordered `checks` ladder is refused, or a ladder is collapsed into a single check."
+- id: A104
+  section: "2.2"
+  rule: "A staged gate takes one attestation per rung, each pinned to the index of the rung it climbed."
+  applies_to: attestation
+  testable: true
+  violation: "An attestation names a rung index the ladder does not have, or an index whose command it did not run."
+- id: A105
+  section: "2.2"
+  rule: "A staged gate is answered only when every rung is present and passing."
+  applies_to: attestation
+  testable: true
+  violation: "A ladder is treated as satisfied with a rung missing or a rung failing."
+- id: A106
+  section: "2.2"
+  rule: "An attestation against a staged gate that does not name the rung it climbed is refused."
+  applies_to: attestation
+  testable: true
+  violation: "Unstaged evidence is accepted against a `checks` ladder."
+- id: A107
+  section: "2.2"
+  rule: "A gate declaring a single `check` refuses an attestation carrying a stage."
+  applies_to: attestation
+  testable: true
+  violation: "Staged evidence is accepted against a single-check gate."
 - id: A010
   section: "2.3"
   rule: "When execution departs from a step, the departure is captured and adjudicated by a party other than the executor."

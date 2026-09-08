@@ -23,21 +23,21 @@ vectors:
     because: "a failing check is valid evidence of failure; refusing it would leave failure unrecordable"
 
   - id: att-accept-staged-rung-0
-    asserts: [A007]
+    asserts: [A104]
     gate: {kind: deterministic, checks: ["pytest -q", "ruff check ."]}
     document: {check: "pytest -q", stage: 0, exit_status: 0, environment: "ci", at: "2026-09-08T09:00:00Z"}
     expect: accept
     because: "a ladder takes one attestation per rung, pinned to its index"
 
   - id: att-accept-staged-rung-1
-    asserts: [A007]
+    asserts: [A104]
     gate: {kind: deterministic, checks: ["pytest -q", "ruff check ."]}
     document: {check: "ruff check .", stage: 1, exit_status: 0, environment: "ci", at: "2026-09-08T09:00:00Z"}
     expect: accept
     because: "the second rung, named correctly"
 
   - id: att-refuse-staged-without-stage
-    asserts: [A007]
+    asserts: [A106]
     gate: {kind: deterministic, checks: ["pytest -q", "ruff check ."]}
     document: {check: "pytest -q", exit_status: 0, environment: "ci", at: "2026-09-08T09:00:00Z"}
     expect: refuse
@@ -45,7 +45,7 @@ vectors:
     because: "evidence that cannot say which rung it climbed is not evidence about the ladder"
 
   - id: att-refuse-stage-names-wrong-command
-    asserts: [A007]
+    asserts: [A104]
     gate: {kind: deterministic, checks: ["pytest -q", "ruff check ."]}
     document: {check: "ruff check .", stage: 0, exit_status: 0, environment: "ci", at: "2026-09-08T09:00:00Z"}
     expect: refuse
@@ -53,7 +53,7 @@ vectors:
     because: "running rung 1 and filing it as rung 0 is the interesting lie, not a typo"
 
   - id: att-refuse-stage-out-of-range
-    asserts: [A007]
+    asserts: [A104]
     gate: {kind: deterministic, checks: ["pytest -q", "ruff check ."]}
     document: {check: "pytest -q", stage: 7, exit_status: 0, environment: "ci", at: "2026-09-08T09:00:00Z"}
     expect: refuse
@@ -61,7 +61,7 @@ vectors:
     because: "a rung the ladder does not have"
 
   - id: att-refuse-stage-on-single-check-gate
-    asserts: [A007]
+    asserts: [A107]
     gate: {kind: deterministic, check: "pytest -q"}
     document: {check: "pytest -q", stage: 0, exit_status: 0, environment: "ci", at: "2026-09-08T09:00:00Z"}
     expect: refuse

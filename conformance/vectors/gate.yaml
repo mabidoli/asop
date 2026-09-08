@@ -20,7 +20,7 @@ vectors:
     because: "the ordinary case: one command, re-run at the completion boundary"
 
   - id: gate-accept-staged
-    asserts: [A007]
+    asserts: [A103]
     document: {kind: deterministic, checks: ["cargo fmt --check", "cargo clippy -- -D warnings", "cargo test"]}
     expect: accept
     because: "a ladder of commands is a valid gate; each rung is attested separately"

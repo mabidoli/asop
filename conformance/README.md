@@ -16,7 +16,7 @@ A document and the outcome a conforming implementation must reach. Nothing else.
   because: "a human gate nobody is named on is a gate nobody answers"
 ```
 
-`asserts` cites [`assertions.yaml`](assertions.yaml) — the 102 normative rules
+`asserts` cites [`assertions.yaml`](assertions.yaml) — the 107 normative rules
 extracted from the specification — so a rule with no vector is visibly untested
 rather than quietly untested.
 
@@ -58,14 +58,14 @@ Stated here because a suite that hides its own coverage is worse than a small on
   convention rather than contract, and pinning it would make the suite a stricter
   opinion than the standard. The cost is that two conforming implementations may
   return different shapes for the same input.
-- **A pattern-matcher could still pass.** With 37 vectors, an implementation that
+- **A pattern-matcher could still pass.** With 39 vectors, an implementation that
   recognises these specific documents rather than implementing the rules would
   score full marks. Commands are varied across vectors to make that less
   comfortable, but the real answer is more vectors, and the honest statement is
   that passing proves the rules exercised here and nothing beyond them.
 - **Only refusal codes are compared, not messages.** Two implementations may
   refuse the same document for different stated reasons.
-- **3 of the 102 assertions are cited by a vector.** The other 99 are all
+- **8 of the 107 assertions are cited by a vector.** The other 99 are all
   `testable: true`. 88 of them need artifact types the runner does not have yet —
   an `asop` record, a `step`, a `revision` changeset — so the honest number for
   what is coverable today is smaller than the gap looks.

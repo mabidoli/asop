@@ -41,7 +41,7 @@ vectors:
     because: "a gate nobody answered is not a gate that passed"
 
   - id: sat-staged-all-rungs
-    asserts: [A008]
+    asserts: [A105]
     gate: {kind: deterministic, checks: ["cargo fmt --check", "cargo test"]}
     attestations:
       - {check: "cargo fmt --check", stage: 0, exit_status: 0, environment: "ci", at: "2026-09-08T09:00:00Z"}
@@ -50,7 +50,7 @@ vectors:
     because: "every rung climbed, every rung green"
 
   - id: sat-staged-missing-rung
-    asserts: [A008]
+    asserts: [A105]
     gate: {kind: deterministic, checks: ["cargo fmt --check", "cargo test"]}
     attestations:
       - {check: "cargo fmt --check", stage: 0, exit_status: 0, environment: "ci", at: "2026-09-08T09:00:00Z"}
@@ -58,7 +58,7 @@ vectors:
     because: "a ladder with a missing rung is not a ladder that was climbed"
 
   - id: sat-staged-rung-failed
-    asserts: [A008]
+    asserts: [A105]
     gate: {kind: deterministic, checks: ["cargo fmt --check", "cargo test"]}
     attestations:
       - {check: "cargo fmt --check", stage: 0, exit_status: 0, environment: "ci", at: "2026-09-08T09:00:00Z"}
