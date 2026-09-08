@@ -43,7 +43,7 @@ Four rules, generic to every registry.
    they are refused to an agent whatever they would produce.
 
 **Who is human is declared, never inferred.** The operator names human actors
-(`AGENTCO_HUMANS`); everyone else is an agent. The default fails closed — an
+(`ASOP_HUMANS`); everyone else is an agent. The default fails closed — an
 undeclared registry treats every reviser as an agent and polices all of them —
 because the alternative, an agent that becomes human by asserting it, would
 make the whole policy a suggestion. The plane states this posture alongside
@@ -62,8 +62,13 @@ from typing import Iterable, Optional, Sequence
 
 from asop.sop import DEFAULT_PROTECTED_TAGS
 
-HUMANS_ENV_VAR = "AGENTCO_HUMANS"
-PROTECTED_TAGS_ENV_VAR = "AGENTCO_PROTECTED_TAGS"
+#: The standard's own names. `AGENTCO_*` is read as a deprecated fallback so the
+#: two implementations that predate the split keep working; a third party
+#: adopting ASOP should never have to set a variable named after someone's company.
+HUMANS_ENV_VAR = "ASOP_HUMANS"
+PROTECTED_TAGS_ENV_VAR = "ASOP_PROTECTED_TAGS"
+LEGACY_HUMANS_ENV_VAR = "AGENTCO_HUMANS"
+LEGACY_PROTECTED_TAGS_ENV_VAR = "AGENTCO_PROTECTED_TAGS"
 
 HUMAN = "human"
 AGENT = "agent"
@@ -102,12 +107,25 @@ def humans_from_env(value: Optional[str] = None) -> frozenset[str]:
     Exact rather than case-folded: the key file already refuses two identities
     that differ only by case, so there is one spelling to match.
     """
-    return _split(value if value is not None else os.environ.get(HUMANS_ENV_VAR))
+    return _split(value if value is not None else _from_env(HUMANS_ENV_VAR, LEGACY_HUMANS_ENV_VAR))
+
+
+def _from_env(name: str, legacy: str) -> Optional[str]:
+    """The standard's variable, falling back to the pre-split name.
+
+    A deprecation with a door: the two implementations that predate the split
+    keep working unchanged, and nothing new is written against the old name.
+    """
+    found = os.environ.get(name)
+    return found if found is not None else os.environ.get(legacy)
 
 
 def protected_tags_from_env(value: Optional[str] = None) -> frozenset[str]:
     """The defaults plus whatever the registry adds. Never fewer than the defaults."""
-    extra = _split(value if value is not None else os.environ.get(PROTECTED_TAGS_ENV_VAR))
+    extra = _split(
+        value if value is not None
+        else _from_env(PROTECTED_TAGS_ENV_VAR, LEGACY_PROTECTED_TAGS_ENV_VAR)
+    )
     return DEFAULT_PROTECTED_TAGS | frozenset(tag.lower() for tag in extra)
 
 
