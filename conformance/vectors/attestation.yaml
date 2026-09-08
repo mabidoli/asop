@@ -1,0 +1,101 @@
+# Conformance vectors — attestations.
+#
+# An attestation is only meaningful against the gate it answers, so each vector
+# carries the gate as context. `submitted_by` is supplied by the runner from the
+# authenticated actor, never from the document — a claim whose author can be
+# forged is not evidence — so it does not appear in these documents except where
+# a vector is specifically testing that a body claiming otherwise is refused.
+
+artifact: attestation
+vectors:
+  - id: att-accept-single
+    asserts: [A007]
+    gate: {kind: deterministic, check: "pytest -q"}
+    document: {check: "pytest -q", exit_status: 0, environment: "ci:linux-x86_64", at: "2026-09-08T09:00:00Z"}
+    expect: accept
+    because: "evidence naming the command the gate declares"
+
+  - id: att-accept-failing-run
+    asserts: [A008]
+    gate: {kind: deterministic, check: "pytest -q"}
+    document: {check: "pytest -q", exit_status: 1, environment: "ci:linux-x86_64", at: "2026-09-08T09:00:00Z"}
+    expect: accept
+    because: "a failing check is valid evidence of failure; refusing it would leave failure unrecordable"
+
+  - id: att-accept-staged-rung-0
+    asserts: [A007]
+    gate: {kind: deterministic, checks: ["pytest -q", "ruff check ."]}
+    document: {check: "pytest -q", stage: 0, exit_status: 0, environment: "ci", at: "2026-09-08T09:00:00Z"}
+    expect: accept
+    because: "a ladder takes one attestation per rung, pinned to its index"
+
+  - id: att-accept-staged-rung-1
+    asserts: [A007]
+    gate: {kind: deterministic, checks: ["pytest -q", "ruff check ."]}
+    document: {check: "ruff check .", stage: 1, exit_status: 0, environment: "ci", at: "2026-09-08T09:00:00Z"}
+    expect: accept
+    because: "the second rung, named correctly"
+
+  - id: att-refuse-staged-without-stage
+    asserts: [A007]
+    gate: {kind: deterministic, checks: ["pytest -q", "ruff check ."]}
+    document: {check: "pytest -q", exit_status: 0, environment: "ci", at: "2026-09-08T09:00:00Z"}
+    expect: refuse
+    refusal: attestation_invalid
+    because: "evidence that cannot say which rung it climbed is not evidence about the ladder"
+
+  - id: att-refuse-stage-names-wrong-command
+    asserts: [A007]
+    gate: {kind: deterministic, checks: ["pytest -q", "ruff check ."]}
+    document: {check: "ruff check .", stage: 0, exit_status: 0, environment: "ci", at: "2026-09-08T09:00:00Z"}
+    expect: refuse
+    refusal: attestation_invalid
+    because: "running rung 1 and filing it as rung 0 is the interesting lie, not a typo"
+
+  - id: att-refuse-stage-out-of-range
+    asserts: [A007]
+    gate: {kind: deterministic, checks: ["pytest -q", "ruff check ."]}
+    document: {check: "pytest -q", stage: 7, exit_status: 0, environment: "ci", at: "2026-09-08T09:00:00Z"}
+    expect: refuse
+    refusal: attestation_invalid
+    because: "a rung the ladder does not have"
+
+  - id: att-refuse-stage-on-single-check-gate
+    asserts: [A007]
+    gate: {kind: deterministic, check: "pytest -q"}
+    document: {check: "pytest -q", stage: 0, exit_status: 0, environment: "ci", at: "2026-09-08T09:00:00Z"}
+    expect: refuse
+    refusal: attestation_invalid
+    because: "a single-check gate has no stage; accepting one lets staged and unstaged evidence borrow each other's shape"
+
+  - id: att-refuse-wrong-command
+    asserts: [A007]
+    gate: {kind: deterministic, check: "pytest -q"}
+    document: {check: "make test", exit_status: 0, environment: "ci", at: "2026-09-08T09:00:00Z"}
+    expect: refuse
+    refusal: attestation_invalid
+    because: "a green report produced by running something easier is the failure this refusal exists for"
+
+  - id: att-refuse-no-environment
+    asserts: [A007]
+    gate: {kind: deterministic, check: "pytest -q"}
+    document: {check: "pytest -q", exit_status: 0, at: "2026-09-08T09:00:00Z"}
+    expect: refuse
+    refusal: attestation_invalid
+    because: "an attestation nobody can reproduce on cannot be disputed either"
+
+  - id: att-refuse-boolean-exit-status
+    asserts: [A008]
+    gate: {kind: deterministic, check: "pytest -q"}
+    document: {check: "pytest -q", exit_status: true, environment: "ci", at: "2026-09-08T09:00:00Z"}
+    expect: refuse
+    refusal: attestation_invalid
+    because: "a boolean makes 'it passed' an opinion rather than an observation"
+
+  - id: att-refuse-forged-submitter
+    asserts: [A007]
+    gate: {kind: deterministic, check: "pytest -q"}
+    document: {check: "pytest -q", exit_status: 0, environment: "ci", at: "2026-09-08T09:00:00Z", submitted_by: "someone-else"}
+    expect: refuse
+    refusal: attestation_invalid
+    because: "the record says who actually called, not who the call says it is"

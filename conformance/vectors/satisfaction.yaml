@@ -1,0 +1,79 @@
+# Conformance vectors — is the gate ANSWERED?
+#
+# The other two files ask whether a document is well formed. This one asks the
+# question that actually gates work: given this gate and these attestations, may
+# the step be recorded as done?
+#
+# The distinction is not academic. A failing attestation is a VALID document —
+# refusing it would leave failure unrecordable — so an implementation that
+# conflates "the evidence parsed" with "the gate passed" will mark a red test
+# run as a green deployment, and every accept-vs-refuse vector in the suite will
+# bless it. That gap was found by adversarial review, 2026-09-08.
+#
+# Each vector gives a gate and an ordered list of attestations; `satisfied` is
+# what a conforming implementation must conclude.
+
+artifact: satisfaction
+vectors:
+  - id: sat-single-passing
+    asserts: [A008]
+    gate: {kind: deterministic, check: "pytest -q"}
+    attestations:
+      - {check: "pytest -q", exit_status: 0, environment: "ci", at: "2026-09-08T09:00:00Z"}
+    satisfied: true
+    because: "one command, re-run, exited zero"
+
+  - id: sat-single-failing
+    asserts: [A008]
+    gate: {kind: deterministic, check: "pytest -q"}
+    attestations:
+      - {check: "pytest -q", exit_status: 1, environment: "ci", at: "2026-09-08T09:00:00Z"}
+    satisfied: false
+    because: >-
+      THE ONE THAT MATTERS. The document is valid and the gate is not answered.
+      An implementation conflating the two ships red as green.
+
+  - id: sat-no-evidence
+    asserts: [A008]
+    gate: {kind: deterministic, check: "pytest -q"}
+    attestations: []
+    satisfied: false
+    because: "a gate nobody answered is not a gate that passed"
+
+  - id: sat-staged-all-rungs
+    asserts: [A008]
+    gate: {kind: deterministic, checks: ["cargo fmt --check", "cargo test"]}
+    attestations:
+      - {check: "cargo fmt --check", stage: 0, exit_status: 0, environment: "ci", at: "2026-09-08T09:00:00Z"}
+      - {check: "cargo test", stage: 1, exit_status: 0, environment: "ci", at: "2026-09-08T09:01:00Z"}
+    satisfied: true
+    because: "every rung climbed, every rung green"
+
+  - id: sat-staged-missing-rung
+    asserts: [A008]
+    gate: {kind: deterministic, checks: ["cargo fmt --check", "cargo test"]}
+    attestations:
+      - {check: "cargo fmt --check", stage: 0, exit_status: 0, environment: "ci", at: "2026-09-08T09:00:00Z"}
+    satisfied: false
+    because: "a ladder with a missing rung is not a ladder that was climbed"
+
+  - id: sat-staged-rung-failed
+    asserts: [A008]
+    gate: {kind: deterministic, checks: ["cargo fmt --check", "cargo test"]}
+    attestations:
+      - {check: "cargo fmt --check", stage: 0, exit_status: 0, environment: "ci", at: "2026-09-08T09:00:00Z"}
+      - {check: "cargo test", stage: 1, exit_status: 1, environment: "ci", at: "2026-09-08T09:01:00Z"}
+    satisfied: false
+    because: "the cheapest rung passing does not carry the expensive one"
+
+  - id: sat-staged-same-rung-twice
+    asserts: [A008]
+    gate: {kind: deterministic, checks: ["cargo fmt --check", "cargo test"]}
+    attestations:
+      - {check: "cargo fmt --check", stage: 0, exit_status: 0, environment: "ci", at: "2026-09-08T09:00:00Z"}
+      - {check: "cargo fmt --check", stage: 0, exit_status: 0, environment: "ci", at: "2026-09-08T09:02:00Z"}
+    satisfied: false
+    because: >-
+      Counting attestations rather than distinct rungs is the plausible
+      implementation error, and re-running the cheap check twice is how it
+      would be reached by accident rather than by malice.

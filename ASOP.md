@@ -474,8 +474,28 @@ bindings, and the harness pulls the step beads its bindings name, executes them,
 and attests to the plane. It never files a run on the plane unprompted and never
 publishes without a human-visible prompt. Its local store is the standalone path.
 
-A harness is **conforming** when it passes the conformance suite in this package against
-its own store: same verbs, same refusals, same statuses, same pin semantics.
+A harness is **conforming** when it passes the vectors in
+[`conformance/vectors/`](conformance/vectors/) against its own validators.
+
+Each vector is a document and the outcome a conforming implementation must reach:
+accepted, or refused with a named code. They are data, not code, so an
+implementation in any language becomes conforming by reading the YAML, validating,
+and comparing — no dependency on this package and no Python required. The
+reference runner in [`conformance/runner/`](conformance/runner/) is about a
+hundred lines, which is the intended size of the obligation.
+
+A third file asks the question that actually gates work: given a gate and a set
+of attestations, may the step be recorded as done? That is separate from whether
+the evidence is well formed, because a FAILING attestation is a valid document —
+refusing it would leave failure unrecordable — and an implementation conflating
+the two records a red run as a green one.
+
+Conformance is a claim about documents, deliberately. Same verbs, same refusals,
+same statuses and same pin semantics remain the goal, but only what a vector can
+check is what conformance currently asserts. The gaps are listed in
+[`conformance/README.md`](conformance/README.md) rather than left for an adopter
+to discover; a suite that hides its own coverage is the thing this section was
+guilty of before these vectors existed.
 
 ---
 

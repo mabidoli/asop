@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+
+      - name: unit suite
+        run: uv run --extra dev --python ${{ matrix.python-version }} pytest -q
+
+      # The claim in ASOP.md 7 is that an implementation is conforming when it
+      # passes these vectors. The reference implementation has to clear its own
+      # bar on every push, or the claim is decoration.
+      - name: conformance vectors
+        run: uv run --with pyyaml --python ${{ matrix.python-version }} python conformance/runner/python.py --verbose
+
+      # The schemas are normative. A schema that stopped being valid JSON Schema
+      # would break every non-Python adopter silently, since they validate
+      # against these files rather than against the Python.
+      - name: schemas are valid draft 2020-12
+        run: |
+          uv run --with jsonschema --with pyyaml --python ${{ matrix.python-version }} python - <<'PY'
+          import pathlib, yaml
+          from jsonschema import Draft202012Validator
+          for f in sorted(pathlib.Path("schema/v1").glob("*.yaml")):
+              Draft202012Validator.check_schema(yaml.safe_load(f.read_text()))
+              print("valid:", f)
+          PY

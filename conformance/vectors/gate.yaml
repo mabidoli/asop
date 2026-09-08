@@ -1,0 +1,136 @@
+# Conformance vectors — gate documents.
+#
+# Each vector is a document and the outcome a conforming implementation must
+# reach. `expect: accept` means the validator returns; `expect: refuse` means it
+# raises with `refusal` as the machine code. `asserts` cites the assertion ids in
+# ../assertions.yaml that the vector exercises, so a rule with no vector is
+# visibly untested rather than quietly untested.
+#
+# Normalised OUTPUT is deliberately not compared. How an implementation shapes
+# what it returns — nulls for absent fields, a stamped schema version — is
+# storage convention, not contract, and pinning it here would make the suite a
+# stricter opinion than the standard.
+
+artifact: gate
+vectors:
+  - id: gate-accept-single
+    asserts: [A007]
+    document: {kind: deterministic, check: "pytest -q"}
+    expect: accept
+    because: "the ordinary case: one command, re-run at the completion boundary"
+
+  - id: gate-accept-staged
+    asserts: [A007]
+    document: {kind: deterministic, checks: ["cargo fmt --check", "cargo clippy -- -D warnings", "cargo test"]}
+    expect: accept
+    because: "a ladder of commands is a valid gate; each rung is attested separately"
+
+  - id: gate-accept-judged
+    asserts: [A007]
+    document: {kind: judged, check: "human review", rubric: "does it meet the AC?", judge_route: "reviewer-box"}
+    expect: accept
+    because: "a judged gate carries the rubric it will be answered against"
+
+  - id: gate-accept-human
+    asserts: [A007]
+    document: {kind: human, check: "approve the release", verifier: "dana", max_park_seconds: 86400, on_timeout: fail}
+    expect: accept
+    because: >-
+      The flagship case, and it was missing: the suite's only human gate expected
+      a refusal, so an implementation that rejected EVERY human gate passed.
+
+  - id: gate-accept-human-escalating
+    asserts: [A007]
+    document: {kind: human, check: "sign off the migration", verifier: "dana", max_park_seconds: 3600, on_timeout: escalate, escalate_to: "eng-lead"}
+    expect: accept
+    because: "escalate_to is permitted precisely when on_timeout says escalate"
+
+  - id: gate-accept-complete-clock
+    asserts: [A009]
+    document: {kind: deterministic, check: "cargo test --locked", max_park_seconds: 3600, on_timeout: fail}
+    expect: accept
+    because: >-
+      The clock is optional, but a COMPLETE one must be accepted. No vector
+      covered that, so treating the whole group as unknown fields passed.
+
+  - id: gate-accept-execution-hints
+    asserts: [A007]
+    document: {kind: deterministic, check: "go test ./...", cwd: "/srv/repo", timeout_s: 600}
+    expect: accept
+    because: "cwd and timeout_s are contract fields; rejecting them broke nothing the suite could see"
+
+  - id: gate-accept-judged-with-clock
+    asserts: [A007, A009]
+    document: {kind: judged, check: "review the diff", rubric: "does it satisfy the acceptance criteria?", judge_route: "reviewer-box", verifier: "dana", max_park_seconds: 7200, on_timeout: fail}
+    expect: accept
+    because: "the execution group and the clock group compose on a judged gate"
+
+  - id: gate-refuse-escalate-without-escalate-to
+    asserts: [A009]
+    document: {kind: deterministic, check: "npm test", max_park_seconds: 3600, on_timeout: escalate}
+    expect: refuse
+    refusal: gate_invalid
+    because: "escalating to nobody is a deadlock wearing a plan"
+
+  - id: gate-refuse-not-an-object
+    asserts: [A007]
+    document: "pytest -q"
+    expect: refuse
+    refusal: gate_invalid
+    because: "a bare command is not a gate; the shape carries the trust model"
+
+  - id: gate-refuse-unknown-kind
+    asserts: [A007]
+    document: {kind: probably-fine, check: "pytest -q"}
+    expect: refuse
+    refusal: gate_invalid
+    because: "the three kinds are the three trust models; a fourth would be an unproven one"
+
+  - id: gate-refuse-no-check
+    asserts: [A007]
+    document: {kind: deterministic}
+    expect: refuse
+    refusal: gate_invalid
+    because: "a gate with nothing to run cannot refuse anything"
+
+  - id: gate-refuse-both-check-and-checks
+    asserts: [A007]
+    document: {kind: deterministic, check: "a", checks: ["a", "b"]}
+    expect: refuse
+    refusal: gate_invalid
+    because: "two spellings of what ran; silently preferring one would decide which evidence counts"
+
+  - id: gate-refuse-verifier-on-deterministic
+    asserts: [A007]
+    document: {kind: deterministic, check: "pytest -q", verifier: "dana"}
+    expect: refuse
+    refusal: gate_invalid
+    because: "a command exiting zero is not a person's judgement; naming one implies review that never happens"
+
+  - id: gate-refuse-rubric-on-deterministic
+    asserts: [A007]
+    document: {kind: deterministic, check: "pytest -q", rubric: "is it good?"}
+    expect: refuse
+    refusal: gate_invalid
+    because: "a rubric belongs to a judged gate; here it is decoration nobody reads"
+
+  - id: gate-refuse-human-without-verifier
+    asserts: [A007]
+    document: {kind: human}
+    expect: refuse
+    refusal: gate_invalid
+    because: "a human gate nobody is named on is a gate nobody answers"
+
+  - id: gate-refuse-partial-clock
+    asserts: [A009]
+    document: {kind: deterministic, check: "pytest -q", max_park_seconds: 3600}
+    expect: refuse
+    refusal: gate_invalid
+    because: "the clock is declared as a whole or not at all; a timeout with no action is a deadlock with a number on it"
+
+  - id: gate-refuse-unknown-field
+    asserts: [A007]
+    document: {kind: deterministic, check: "pytest -q", retries: 3}
+    expect: refuse
+    refusal: gate_invalid
+    because: "an unknown field is a caller believing something the gate will not do"
