@@ -8,6 +8,43 @@ about what it is.
 
 _Nothing yet._
 
+## v3.2 — 2026-09-09
+
+A concept-level cross-validation, not an implementation review: three independent builds
+of this contract in one week — a Python harness, the Python plane, and a .NET
+implementation at Acme — each separately shipped the same two gaps. That is a
+stronger signal than any one code review, so it goes in the specification rather than
+one team's bug tracker. v3's seven decisions (§11) stand unchanged, no ASOP/Step record
+shape moved, and `ASOP_VERSION` stays at `3`.
+
+- **A claimed identity is now authenticated, not merely compared.** §5.3, §6.1 and §9 now
+  say explicitly that a `judged`/`human` attestation's `submitted_by`, and an
+  adjudication's adjudicator, must resolve against the operator's declared registry
+  before being accepted — not just differ from the executor's name. All three
+  implementations had shipped "differs from the executor" as the entire check; two were
+  caught only after the fact. The new refusal is `unauthenticated` (§10); the verb tables
+  in §8.3/§8.4 are updated to return it.
+- **An attestation now carries a verdict, not just a name.** §5.3 requires a `judged` or
+  `human` attestation to say which part of the gate's `check` (or which rung of a
+  `checks` ladder) was found true or false. An identity and a timestamp with no verdict
+  is `attestation_invalid` — it shows a party was named, not that a party looked. One of
+  the three implementations had already documented this exact distinction, in a real
+  procedure, in its own author's words, hours before an independent model review said the
+  same thing about a second implementation.
+
+### Distribution
+
+`asop-spec` 0.3.0 — minor rather than patch. An attestation that used to pass with a bare
+name now needs a resolvable identity and a verdict; anyone who had accepted the former
+will see new refusals.
+
+### Still open
+
+`schema/v1/attestation.yaml` and the conformance vectors do not yet encode `verdict` or
+`unauthenticated` — this release states the rule in prose; making it machine-checkable is
+follow-up work, tracked separately rather than silently assumed done. The §3.5 `uses`
+erratum from v3.1 is also still open.
+
 ## v3.1 — 2026-09-08
 
 Corrections and a conformance layer. v3's seven decisions (§11 of the
