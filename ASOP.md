@@ -5,8 +5,8 @@
 > other than the one that did the work, and revised from the evidence its own
 > runs produce.*
 
-**Status:** v3.1 — v3's seven review questions (§11) stand as decided 2026-09-04;
-v3.1 is corrections and the conformance layer ([`CHANGELOG.md`](CHANGELOG.md)).
+**Status:** v3.2 — v3's seven review questions (§11) stand as decided 2026-09-04;
+v3.1 and v3.2 are corrections ([`CHANGELOG.md`](CHANGELOG.md)).
 Supersedes v2.
 **Home:** this repository — the specification, its normative [schema](schema/v1/), its
 [conformance vectors](conformance/) and a reference implementation. Distributed as
@@ -340,6 +340,40 @@ the plane verifies and stores the claim. It does not run commands. A `judged` or
 `human` gate's attestation names the judge or the person; a `deterministic` gate's
 attestation names the executor, and every reader of it knows that is a claim.
 
+**Naming is not authenticating.** A `judged` or `human` attestation's `submitted_by` is
+checked against the operator's declared registry for that role (§6.1's adjudicator,
+§6.4's human, or the gate's own `verifier`) before it is accepted, never trusted on the
+strength of the string alone. An identity the registry cannot resolve is
+`unauthenticated` (§10), whether or not it differs from the executor's — three
+independent implementations of this contract shipped "differs from the executor" as the
+whole check and called it verification; it is a mistake detector, not a credential. An
+unset or absent registry authenticates nobody, not everybody: the failure mode is closed,
+matching the deterministic gate's own posture (§9) — a check that cannot run is not
+silently a pass.
+
+**A name is not a verdict.** A `judged` or `human` attestation carries a `verdict` — which
+part of the gate's `check` (or which rung of its `checks`, §2.2) the attesting party found
+true or false, in their own words. An attestation with an identity and a timestamp but no
+verdict is `attestation_invalid` (§10): it proves a party was named, not that a party
+looked. The ladder rule already says evidence that cannot name which rung it climbed is
+not evidence about the ladder; this is the same requirement one level up — evidence that
+cannot say what it found is not evidence of having judged.
+
+The wire shape is `verdict: {passed: boolean, reason: nonblank string}`.
+It applies to the attestation's `check` and, for a ladder, its `stage`; these
+must match the gate as usual. `reason` explains the finding about that check
+in the attesting party's own words. Missing or malformed verdicts on `judged`
+and `human` gates are `attestation_invalid`. Deterministic attestations may
+omit a verdict; if supplied, it must have the same shape and semantics.
+
+Valid evidence passes only when `exit_status == 0` and any supplied verdict
+has `passed: true`. A negative verdict with exit status zero is stored as
+valid evidence of failure; a positive verdict never overrides a nonzero exit
+status. Thus contradictory signals fail closed, and every ladder rung must
+satisfy both conditions before the gate releases dependents. Validators check
+the verdict's structure and its attachment to the declared check; they cannot
+prove that the prose is truthful or that judgment was actually exercised.
+
 ### 5.4 Failure and repair
 
 A failed step **keeps its failed status** — still blocking everything after it — until
@@ -374,6 +408,13 @@ operator has **declared** as an adjudicator and that is distinct from the execut
 Declared, never inferred: a registry with no declared adjudicator makes the operator the
 only one. A harness where the only possible adjudicator is the executor's own route has
 no self-improvement loop, and its ASOPs are documentation.
+
+"Declared" names an invariant, not a mechanism — the mechanism is §5.3's: an adjudication
+is `unauthenticated` (§10) unless the adjudicator's claimed identity resolves against the
+operator's declared registry, checked at adjudication time, not assumed from the fact
+that a name was given. A harness that checks only that the claimed name differs from the
+executor's has implemented the invariant's shadow, not the invariant — the distinction
+that matters, and the one every early implementation of this contract skipped.
 
 ### 6.2 Plan-vs-actual
 
@@ -514,7 +555,7 @@ to one.
 |---|---|---|---|---|
 | `work_claim(bead_id, ttl)` | a binding eligible for the step's role | bead ready; no live lease | fenced lease with attempt number | `work_conflict`, `capability_mismatch`, `bad_ttl` |
 | `work_report(bead_id, attempt, result)` | the lease holder | attempt is current | store runs the gate at the flip (§5.2) | `not_the_holder`, `attempt_required`, `attestation_required` |
-| `work_attest(bead_id, attestation)` | the executing domain | bead reported | plane verifies and stores the claim | `attestation_invalid` |
+| `work_attest(bead_id, attestation)` | the executing domain | bead reported | plane verifies and stores the claim | `attestation_invalid`, `unauthenticated` |
 | `verify_approve(bead_id)` / `verify_reject(bead_id, reason)` | the named `verifier` | bead is `awaiting_verify` | `done` / `verify_failed` | `not_terminal`, `unauthenticated` |
 | `repair(bead_id)` | human or agent | bead is `verify_failed` | files a sibling repair bead (§5.4) | `decomposition_bound` |
 
@@ -522,7 +563,7 @@ to one.
 
 | verb | caller | preconditions | effect | refusals |
 |---|---|---|---|---|
-| `adjudicate(bead_id, good\|bad, evidence)` | anyone but the executor | bead executed; none exists | adjudication recorded | `adjudication_self`, `adjudication_exists`, `adjudication_unexecuted`, `adjudication_invalid` |
+| `adjudicate(bead_id, good\|bad, evidence)` | anyone but the executor | bead executed; none exists | adjudication recorded | `adjudication_self`, `adjudication_exists`, `adjudication_unexecuted`, `adjudication_invalid`, `unauthenticated` |
 | `propose(asop_id?)` | human, or a scheduled pass | unproposed adjudications exist | drafts the next version (§6.3) | `sop_refused` |
 | `outcomes(asop_id)` | any | — | per-version and per-step counts | — |
 | `promote(run_id)` | human (v3) | run complete; no active ASOP for its `task_type` | drafts an ASOP from the tree (§6.5) | `decomposition_bound`, `sop_refused` |
@@ -536,6 +577,12 @@ Unchanged from v2 Part III; restated per step.
 **Trust domains.** Gate enforcement happens inside the domain that owns the bead — the
 store that flips its status — never in a shared plane. A plane stays advisory and
 verifies attestations.
+
+**Identity.** A claimed adjudicator, verifier, or judge route is authenticated against
+the operator's declared registry (§5.3, §6.1) before its attestation is accepted —
+resolving a claim is the store's job, at the same choke point that flips a bead's status,
+not a convention the caller is trusted to honour. A registry with nothing declared
+authenticates nobody; there is no fallback that authenticates everybody.
 
 **Execution contract for `deterministic` checks.** Per gate, an implementation pins:
 identity (which principal runs the check), environment (working directory and permitted
@@ -567,7 +614,8 @@ stack trace. Codes relevant to ASOPs, from `asop.refusals`, plus the ones v3 add
 | `adjudication_self` / `_exists` / `_unexecuted` / `_invalid` | §6.1 |
 | `work_conflict` / `not_the_holder` / `attempt_required` | fenced-lease rules |
 | `capability_mismatch` | the caller's binding is not eligible for the step's role |
-| `attestation_required` / `attestation_invalid` | §5.3 |
+| `attestation_required` / `attestation_invalid` | §5.3 — invalid also covers a `judged`/`human` attestation with no `verdict`, or one not tied to the gate's `check` |
+| **`unauthenticated`** *(v3.2)* | a claimed adjudicator, verifier, or judge identity does not resolve against the operator's declared registry (§5.3, §6.1, §9) |
 | `not_terminal` | a verdict on a bead that is not parked |
 | `metadata_reserved` / `natural_key_reserved` | a caller wrote a plane-owned key |
 | **`inputs_missing`** *(v3)* | a declared run input was not supplied |
@@ -678,4 +726,9 @@ frontier-model vendors 2026-08-31 (unanimous "adapt"; must-fixes became the enfo
 model). v3 drafted 2026-09-04 from a review that found the shipped grain and gate
 placement did not match v2's text. Prior-art review 2026-08-31 (AWS Agentic SOPs/Strands,
 Decagon AOPs, Skan, Agent-S): instruction documents all — none carry per-version
-outcomes, embedded gates, or divergence-driven revision.*
+outcomes, embedded gates, or divergence-driven revision. v3.2 drafted 2026-09-09 from a
+cross-validation of the CONCEPT (not any one implementation) against ~30 prior design
+notes spanning three independent builds of this contract in one week — every one of the
+three had separately shipped "declared, never inferred" with no authentication behind it,
+and one had separately documented, in its own words, that its "distinct verifier" check
+proved a name looked, not that judgment was exercised.*

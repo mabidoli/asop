@@ -77,3 +77,115 @@ vectors:
       Counting attestations rather than distinct rungs is the plausible
       implementation error, and re-running the cheap check twice is how it
       would be reached by accident rather than by malice.
+
+  - id: sat-judged-positive-exit-0
+    asserts:
+    - A109
+    gate: &id001
+      kind: judged
+      check: review output
+    attestations:
+    - check: review output
+      exit_status: 0
+      environment: review
+      at: '2026-09-09T12:00:00Z'
+      verdict: &id002
+        passed: true
+        reason: The output meets the check.
+    satisfied: true
+    because: Both execution and judgment must pass; conflicting signals block completion.
+  - id: sat-judged-positive-exit-1
+    asserts:
+    - A109
+    gate: *id001
+    attestations:
+    - check: review output
+      exit_status: 1
+      environment: review
+      at: '2026-09-09T12:00:00Z'
+      verdict: *id002
+    satisfied: false
+    because: Both execution and judgment must pass; conflicting signals block completion.
+  - id: sat-judged-negative-exit-0
+    asserts:
+    - A109
+    gate: *id001
+    attestations:
+    - check: review output
+      exit_status: 0
+      environment: review
+      at: '2026-09-09T12:00:00Z'
+      verdict: &id003
+        passed: false
+        reason: The output fails the check.
+    satisfied: false
+    because: Both execution and judgment must pass; conflicting signals block completion.
+  - id: sat-judged-negative-exit-1
+    asserts:
+    - A109
+    gate: *id001
+    attestations:
+    - check: review output
+      exit_status: 1
+      environment: review
+      at: '2026-09-09T12:00:00Z'
+      verdict: *id003
+    satisfied: false
+    because: Both execution and judgment must pass; conflicting signals block completion.
+  - id: sat-human-positive-exit-0
+    asserts:
+    - A109
+    gate: &id004
+      kind: human
+      check: review output
+      verifier: reviewer
+      max_park_seconds: 60
+      on_timeout: fail
+    attestations:
+    - check: review output
+      exit_status: 0
+      environment: review
+      at: '2026-09-09T12:00:00Z'
+      verdict: &id005
+        passed: true
+        reason: The output meets the check.
+    satisfied: true
+    because: Both execution and judgment must pass; conflicting signals block completion.
+  - id: sat-human-positive-exit-1
+    asserts:
+    - A109
+    gate: *id004
+    attestations:
+    - check: review output
+      exit_status: 1
+      environment: review
+      at: '2026-09-09T12:00:00Z'
+      verdict: *id005
+    satisfied: false
+    because: Both execution and judgment must pass; conflicting signals block completion.
+  - id: sat-human-negative-exit-0
+    asserts:
+    - A109
+    gate: *id004
+    attestations:
+    - check: review output
+      exit_status: 0
+      environment: review
+      at: '2026-09-09T12:00:00Z'
+      verdict: &id006
+        passed: false
+        reason: The output fails the check.
+    satisfied: false
+    because: Both execution and judgment must pass; conflicting signals block completion.
+  - id: sat-human-negative-exit-1
+    asserts:
+    - A109
+    gate: *id004
+    attestations:
+    - check: review output
+      exit_status: 1
+      environment: review
+      at: '2026-09-09T12:00:00Z'
+      verdict: *id006
+    satisfied: false
+    because: Both execution and judgment must pass; conflicting signals block completion.

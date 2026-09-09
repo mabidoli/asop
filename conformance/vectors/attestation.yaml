@@ -99,3 +99,129 @@ vectors:
     expect: refuse
     refusal: attestation_invalid
     because: "the record says who actually called, not who the call says it is"
+
+  - id: att-judged-verdict-missing
+    asserts:
+    - A108
+    gate: &id001
+      kind: judged
+      check: review output
+    document:
+      check: review output
+      exit_status: 0
+      environment: review
+      at: '2026-09-09T12:00:00Z'
+    expect: refuse
+    because: Judgment requires a boolean outcome and a nonblank explanation about the
+      attested check.
+    refusal: attestation_invalid
+  - id: att-judged-verdict-blank
+    asserts:
+    - A108
+    gate: *id001
+    document:
+      check: review output
+      exit_status: 0
+      environment: review
+      at: '2026-09-09T12:00:00Z'
+      verdict:
+        passed: true
+        reason: ' '
+    expect: refuse
+    because: Judgment requires a boolean outcome and a nonblank explanation about the
+      attested check.
+    refusal: attestation_invalid
+  - id: att-judged-verdict-positive
+    asserts:
+    - A108
+    gate: *id001
+    document:
+      check: review output
+      exit_status: 0
+      environment: review
+      at: '2026-09-09T12:00:00Z'
+      verdict:
+        passed: true
+        reason: The output meets the check.
+    expect: accept
+    because: Judgment requires a boolean outcome and a nonblank explanation about the
+      attested check.
+  - id: att-judged-verdict-negative
+    asserts:
+    - A108
+    gate: *id001
+    document:
+      check: review output
+      exit_status: 0
+      environment: review
+      at: '2026-09-09T12:00:00Z'
+      verdict:
+        passed: false
+        reason: The output fails the check.
+    expect: accept
+    because: Judgment requires a boolean outcome and a nonblank explanation about the
+      attested check.
+  - id: att-human-verdict-missing
+    asserts:
+    - A108
+    gate: &id002
+      kind: human
+      check: review output
+      verifier: reviewer
+      max_park_seconds: 60
+      on_timeout: fail
+    document:
+      check: review output
+      exit_status: 0
+      environment: review
+      at: '2026-09-09T12:00:00Z'
+    expect: refuse
+    because: Judgment requires a boolean outcome and a nonblank explanation about the
+      attested check.
+    refusal: attestation_invalid
+  - id: att-human-verdict-blank
+    asserts:
+    - A108
+    gate: *id002
+    document:
+      check: review output
+      exit_status: 0
+      environment: review
+      at: '2026-09-09T12:00:00Z'
+      verdict:
+        passed: true
+        reason: ' '
+    expect: refuse
+    because: Judgment requires a boolean outcome and a nonblank explanation about the
+      attested check.
+    refusal: attestation_invalid
+  - id: att-human-verdict-positive
+    asserts:
+    - A108
+    gate: *id002
+    document:
+      check: review output
+      exit_status: 0
+      environment: review
+      at: '2026-09-09T12:00:00Z'
+      verdict:
+        passed: true
+        reason: The output meets the check.
+    expect: accept
+    because: Judgment requires a boolean outcome and a nonblank explanation about the
+      attested check.
+  - id: att-human-verdict-negative
+    asserts:
+    - A108
+    gate: *id002
+    document:
+      check: review output
+      exit_status: 0
+      environment: review
+      at: '2026-09-09T12:00:00Z'
+      verdict:
+        passed: false
+        reason: The output fails the check.
+    expect: accept
+    because: Judgment requires a boolean outcome and a nonblank explanation about the
+      attested check.

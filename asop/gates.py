@@ -98,6 +98,7 @@ ATTESTATION_FIELDS = (
     "environment",
     "at",
     "submitted_by",
+    "verdict",
 )
 
 SCHEMA_VERSION = 1
@@ -584,6 +585,21 @@ def validate_attestation(payload: Any, *, gate: dict, submitted_by: str) -> dict
             "'it passed' an opinion rather than an observation.",
         )
 
+    verdict = payload.get("verdict")
+    if gate.get("kind") in {"judged", "human"} or "verdict" in payload:
+        if (
+            not isinstance(verdict, dict)
+            or set(verdict) != {"passed", "reason"}
+            or not isinstance(verdict.get("passed"), bool)
+            or not isinstance(verdict.get("reason"), str)
+            or not verdict["reason"].strip()
+        ):
+            _refuse(
+                ATTESTATION_INVALID,
+                "verdict must contain a boolean passed and a nonblank reason",
+                "Explain what the attested check or stage found and whether it passed.",
+            )
+
     environment = payload.get("environment")
     if not isinstance(environment, str) or not environment.strip():
         _refuse(
@@ -613,14 +629,20 @@ def validate_attestation(payload: Any, *, gate: dict, submitted_by: str) -> dict
         "at": at.strip(),
         "submitted_by": submitted_by,
     }
+    if "verdict" in payload:
+        normalised["verdict"] = {"passed": verdict["passed"], "reason": verdict["reason"].strip()}
     if staged:
         normalised["stage"] = stage
     return normalised
 
 
 def attestation_passes(attestation: dict) -> bool:
-    """Exit 0 and nothing else. The one place this convention is stated."""
-    return attestation.get("exit_status") == 0
+    """Validated evidence passes only if execution and any judgment pass."""
+    verdict = attestation.get("verdict")
+    return attestation.get("exit_status") == 0 and (
+        "verdict" not in attestation
+        or (isinstance(verdict, dict) and verdict.get("passed") is True)
+    )
 
 
 def gate_satisfied(gate: dict, attestations: Sequence[dict]) -> bool:
