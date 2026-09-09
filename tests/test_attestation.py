@@ -87,3 +87,34 @@ def test_the_retry_policy_stops_at_two():
     assert gates.retry_decision(17) == "stop"
     with pytest.raises(ValueError):
         gates.retry_decision(0)
+
+
+@pytest.mark.parametrize("kind", ["judged", "human"])
+@pytest.mark.parametrize("verdict", [None, "approved", {}, {"passed": 1, "reason": "ok"}, {"passed": True, "reason": " "}, {"passed": True, "reason": "ok", "extra": 1}])
+def test_judgment_requires_a_structured_verdict(kind, verdict):
+    payload = attestation()
+    if verdict is not None:
+        payload["verdict"] = verdict
+    with pytest.raises(Refusal) as caught:
+        gates.validate_attestation(payload, gate=dict(GATE, kind=kind), submitted_by="judge")
+    assert caught.value.code == gates.ATTESTATION_INVALID
+
+
+@pytest.mark.parametrize("kind", ["judged", "human", "deterministic"])
+@pytest.mark.parametrize("passed,exit_status,expected", [(True, 0, True), (False, 0, False), (True, 1, False), (False, 1, False)])
+def test_judgment_and_execution_must_both_pass(kind, passed, exit_status, expected):
+    payload = dict(attestation(exit_status=exit_status), verdict={"passed": passed, "reason": "  The declared check was reviewed.  "})
+    record = gates.validate_attestation(payload, gate=dict(GATE, kind=kind), submitted_by="judge")
+    assert record["verdict"]["reason"] == "The declared check was reviewed."
+    assert gates.gate_satisfied(dict(GATE, kind=kind), [record]) is expected
+
+
+def test_negative_judgment_blocks_a_staged_gate():
+    gate = {"kind": "judged", "checks": ["review correctness", "review coverage"]}
+    records = [gates.validate_attestation(
+        dict(attestation(check=check), stage=stage, verdict={"passed": stage == 0, "reason": "Reviewed this rung."}),
+        gate=gate, submitted_by="judge",
+    ) for stage, check in enumerate(gate["checks"])]
+    assert gates.gate_satisfied(gate, records) is False
+    records[1]["verdict"]["passed"] = True
+    assert gates.gate_satisfied(gate, records) is True

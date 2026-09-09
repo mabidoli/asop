@@ -40,9 +40,11 @@ will see new refusals.
 
 ### Still open
 
-`schema/v1/attestation.yaml` and the conformance vectors do not yet encode `verdict` or
-`unauthenticated` — this release states the rule in prose; making it machine-checkable is
-follow-up work, tracked separately rather than silently assumed done. The §3.5 `uses`
+`verdict` is encoded in the attestation schema, reference validator, and conformance
+vectors. It carries a boolean `passed` and a nonblank `reason`; completion requires
+both exit status zero and a positive verdict when present. Registry authentication
+(`unauthenticated`) remains a store/transport integration requirement; the standalone
+validator receives an already authenticated submitter and does not resolve registries. The §3.5 `uses`
 erratum from v3.1 is also still open.
 
 ## v3.1 — 2026-09-08

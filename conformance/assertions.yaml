@@ -686,3 +686,15 @@
   applies_to: asop
   testable: true
   violation: "Nesting is used to bypass the 7-step or 3-depth decomposition limits."
+- id: A108
+  section: "5.3"
+  rule: "Judged and human attestations require a verdict with boolean passed and nonblank reason, attached to the attested check/stage."
+  applies_to: attestation
+  testable: true
+  violation: "A judged or human attestation is accepted without a well-formed verdict."
+- id: A109
+  section: "5.3"
+  rule: "Evidence passes only with exit status zero and a positive verdict when present."
+  applies_to: attestation
+  testable: true
+  violation: "A negative verdict or nonzero exit status releases dependents."

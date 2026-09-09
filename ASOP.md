@@ -359,6 +359,21 @@ looked. The ladder rule already says evidence that cannot name which rung it cli
 not evidence about the ladder; this is the same requirement one level up — evidence that
 cannot say what it found is not evidence of having judged.
 
+The wire shape is `verdict: {passed: boolean, reason: nonblank string}`.
+It applies to the attestation's `check` and, for a ladder, its `stage`; these
+must match the gate as usual. `reason` explains the finding about that check
+in the attesting party's own words. Missing or malformed verdicts on `judged`
+and `human` gates are `attestation_invalid`. Deterministic attestations may
+omit a verdict; if supplied, it must have the same shape and semantics.
+
+Valid evidence passes only when `exit_status == 0` and any supplied verdict
+has `passed: true`. A negative verdict with exit status zero is stored as
+valid evidence of failure; a positive verdict never overrides a nonzero exit
+status. Thus contradictory signals fail closed, and every ladder rung must
+satisfy both conditions before the gate releases dependents. Validators check
+the verdict's structure and its attachment to the declared check; they cannot
+prove that the prose is truthful or that judgment was actually exercised.
+
 ### 5.4 Failure and repair
 
 A failed step **keeps its failed status** — still blocking everything after it — until

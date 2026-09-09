@@ -62,8 +62,8 @@ properties:
   exit_status:
     type: integer
     description: >-
-      The process's actual exit status. Passing means exit_status == 0 and
-      nothing else — the one place that convention is stated. A boolean here
+      The process's actual exit status. Passing requires exit_status == 0 and, when a verdict is present,
+      verdict.passed == true — the one place that convention is stated. A boolean here
       would make "it passed" an opinion rather than an observation.
 
   environment:
@@ -79,6 +79,22 @@ properties:
     description: >-
       When the check ran, ISO-8601. Without it a stale attestation is
       indistinguishable from a fresh one.
+
+  verdict:
+    description: >-
+      Required for judged and human gates (a cross-record rule enforced at
+      submission). Applies to this record's check and, for a ladder, stage.
+      The reason explains the finding about that check in the attester's own
+      words. A negative verdict is valid evidence of failure, even with exit
+      status zero; a positive verdict cannot override a nonzero exit status.
+    type: object
+    additionalProperties: false
+    required: [passed, reason]
+    properties:
+      passed:
+        type: boolean
+      reason:
+        $ref: '#/$defs/nonBlankString'
 
   submitted_by:
     description: >-
