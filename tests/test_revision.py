@@ -27,6 +27,7 @@ from asop.revision import (
     verifiers_from_env,
     adjudicators_from_env,
     resolves,
+    may_adjudicate,
     kind_of,
     protected_tags_from_env,
     require_human,
@@ -318,3 +319,23 @@ def test_adjudicators_are_declared_separately_from_verifiers(monkeypatch):
 def test_the_registry_format_matches_the_one_operators_already_know(monkeypatch):
     monkeypatch.setenv("ASOP_VERIFIERS", " reviewer-a ,, reviewer-b ")
     assert verifiers_from_env() == {"reviewer-a", "reviewer-b"}
+
+
+def test_an_empty_adjudicator_registry_leaves_the_operator(monkeypatch):
+    """Section 6.1's posture: empty means human-only, not nobody. Using plain
+    resolves() here would refuse the operator their own loop."""
+    monkeypatch.setenv("ASOP_HUMANS", "mabidoli")
+    monkeypatch.delenv("ASOP_ADJUDICATORS", raising=False)
+    humans, adj = humans_from_env(), adjudicators_from_env()
+    assert may_adjudicate("mabidoli", adj, humans) is True
+    assert may_adjudicate("some-route", adj, humans) is False
+    assert may_adjudicate(None, adj, humans) is False
+
+
+def test_a_declared_route_adjudicates_alongside_the_human(monkeypatch):
+    monkeypatch.setenv("ASOP_HUMANS", "mabidoli")
+    monkeypatch.setenv("ASOP_ADJUDICATORS", "reviewer-route")
+    humans, adj = humans_from_env(), adjudicators_from_env()
+    assert may_adjudicate("reviewer-route", adj, humans) is True
+    assert may_adjudicate("mabidoli", adj, humans) is True
+    assert may_adjudicate("unlisted", adj, humans) is False

@@ -173,6 +173,27 @@ def resolves(actor: Optional[str], registry: Iterable[str]) -> bool:
     return actor is not None and actor in set(registry)
 
 
+def may_adjudicate(
+    actor: Optional[str],
+    adjudicators: Iterable[str],
+    humans: Iterable[str],
+) -> bool:
+    """Whether this actor may adjudicate a divergence (ASOP.md §6.1).
+
+    Deliberately NOT plain `resolves()` against the adjudicator registry. §6.1's
+    rule is that an empty registry leaves the OPERATOR as the only adjudicator —
+    a declared human adjudicates by being human, and the registry is how a
+    *route* is opted in on top of that. An implementation that used `resolves()`
+    here would refuse its own operator the moment they had not also listed
+    themselves as a route, and the human-only default — the posture §6.1 starts
+    from — would be unreachable.
+
+    The executor check is separate and still applies: this says who MAY
+    adjudicate, never that they may adjudicate their own step.
+    """
+    return resolves(actor, adjudicators) or resolves(actor, humans)
+
+
 def kind_of(actor: Optional[str], humans: Iterable[str]) -> str:
     """`human` if the operator declared this actor human; `agent` otherwise.
 

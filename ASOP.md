@@ -597,17 +597,40 @@ three answers. The declarations are, alongside the two §6.4 already names:
 
 Comma-separated actor names, matched on exact spelling — the same format and the same
 rule as `ASOP_HUMANS`, so an operator declaring who may verify does not have to learn a
-second syntax to declare who may judge. Unset and empty are the same thing and both
-resolve **nobody**. `asop.revision` ships `verifiers_from_env`, `adjudicators_from_env`
-and `resolves(actor, registry)` so that two implementations reading the same declaration
-cannot disagree about what it says.
+second syntax to declare who may judge. `asop.revision` ships `verifiers_from_env`,
+`adjudicators_from_env`, `resolves(actor, registry)` and `may_adjudicate(...)` so that
+two implementations reading the same declaration cannot disagree about what it says.
+
+**What an empty registry means, exactly** — because the loose reading of this is what
+§6.1 and this section were caught disagreeing about. These registries declare **routes**,
+not people. An empty registry therefore grants **no route** the authority; it does not
+grant everyone the authority, and it does not withdraw it from the operator:
+
+- **Verification.** An empty `ASOP_VERIFIERS` resolves nobody. A `judged` gate with no
+  declared route cannot be answered by a route at all; it waits for a person, which is
+  what a `human` gate already is.
+- **Adjudication.** An empty `ASOP_ADJUDICATORS` leaves the operator as the only
+  adjudicator — the reading §6.1 has always had. A declared human adjudicates *by being
+  human*, not by also appearing in the adjudicator registry; the registry is how a
+  **route** is opted in, and the human-only posture is the default it starts from.
+
+So `resolves()` answers one question — did the operator declare this route — and
+`may_adjudicate(actor, adjudicators, humans)` answers the one §6.1 actually asks, which
+is that question **or** whether the actor is a declared human. An implementation that
+uses the first where the second is meant will refuse its own operator.
 
 **Authentication is the transport's, resolution is the store's.** These are two
 questions and conflating them is how the permissive reading gets in. The transport
 answers *who is calling* — `submitted_by` is set from the authenticated actor, never
 copied from a body that claims otherwise. The store then answers *did the operator
-declare them for this role*. The reference validator does the second only; it is handed
-an already-authenticated submitter and resolves no registries itself.
+declare them for this role*, at the choke point where it flips the status.
+
+The **reference validator does neither**. It checks that a record is well formed and
+that it attests to the gate it claims to; it is handed an already-authenticated
+submitter and resolves no registries. Both questions are the integrator's, and a
+conforming implementation is not excused from them by the validator accepting a
+document — a valid attestation from an undeclared route is a valid document and an
+unauthorised answer.
 
 **Execution contract for `deterministic` checks.** Per gate, an implementation pins:
 identity (which principal runs the check), environment (working directory and permitted
