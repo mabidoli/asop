@@ -497,6 +497,33 @@ bindings, and the harness pulls the step beads its bindings name, executes them,
 and attests to the plane. It never files a run on the plane unprompted and never
 publishes without a human-visible prompt. Its local store is the standalone path.
 
+**The standalone store may be an embedded plane.** "A local ASOP store with the same
+contract" is a requirement about behaviour, not about writing a second implementation of
+it — and writing one is how implementations drift. A harness MAY satisfy its local store
+by embedding a plane in-process, and doing so is the recommended shape: one lifecycle,
+one set of gate semantics, one answer to a staged ladder. Nothing about the connected
+case changes, because an embedded plane is not a configured plane; it is this harness's
+store, and §9's rule that enforcement happens in the domain owning the bead already
+describes it.
+
+**One run has exactly one owning store, decided at filing and never moved.** This is what
+makes an embedded plane and a remote plane coexist without §11.8's objection — that
+outcomes for runs the plane did not file leave two queues to agree about one run. They
+never agree, because they never both own one:
+
+- A run **filed on the remote plane** is owned there. The harness pulls, executes,
+  reports and attests. Unchanged from §11.8.
+- A run **filed locally** is owned locally for its whole life. The remote receives it as
+  a **journal**: it may read, count, run the lessons pass and route human gates against
+  it, and it may not complete a step of it. A journal that could complete would be a
+  second authority over one run, which is the thing being avoided.
+
+Ownership is a property of the run, recorded when it is filed, and no verb moves it. A
+harness with a remote configured therefore still works when that remote is unreachable —
+it files locally, owns what it filed, and journals it upward when the remote returns.
+That is what "never blocks a harness" means in practice, and it is now literal rather
+than aspirational.
+
 A harness is **conforming** when it passes the vectors in
 [`conformance/vectors/`](conformance/vectors/) against its own validators.
 
@@ -718,6 +745,16 @@ stack trace. Codes relevant to ASOPs, from `asop.refusals`, plus the ones v3 add
    runs it did not file and leaves two queues to agree about one run. The wire keeps
    the verbs it has (`agentco pull` / `agentco report`) as a protocol name, whatever
    the binary is called.
+
+   **Qualified 2026-09-10 (v3.4).** The decision stands for every run the plane files,
+   which is what it was about. It was reasoned in a world with two topologies —
+   standalone, or connected-and-the-plane-owns-everything — and its objection to the
+   alternative was precise: accepting outcomes for runs it did not file "leaves two
+   queues to agree about one run". §7 now answers that objection rather than reopening
+   it. Ownership is fixed at filing and never moves, so two queues never hold one run;
+   a locally-filed run is owned locally and journalled upward, and the plane may not
+   complete a step of a run it does not own. What changes is only that "connected" no
+   longer implies "everything was filed there".
 
 7. **Promotion authority.** **DECIDED 2026-09-04: humans only in v3.** `promote` is a
    human verb. It drafts an ASOP from a run tree, and is refused when an active ASOP
