@@ -491,8 +491,9 @@ A **plane** stores ASOPs, versions them, records outcomes per version, routes hu
 gates and adjudications, runs the lessons pass across every harness that reports to it,
 and is otherwise advisory: it never executes a check and never blocks a harness.
 
-A **harness** runs standalone against a local ASOP store with the same contract. When a
-plane is configured, **the plane owns the queue**: runs are filed on the plane with
+A **harness** runs standalone against a local ASOP store with the same contract. In
+`remote-owned` mode — the mode §11.8 was decided for, and the default when a plane is
+configured without saying otherwise (§7.1) — **the plane owns the queue**: runs are filed on the plane with
 bindings, and the harness pulls the step beads its bindings name, executes them, reports
 and attests to the plane. It never files a run on the plane unprompted and never
 publishes without a human-visible prompt. Its local store is the standalone path.
@@ -550,6 +551,15 @@ unreachable, the owning store routes it itself. An embedded plane is a whole pla
 can. Without this, a remote outage silently converts a human gate into an `on_timeout`
 resolution — decided by omission, which §9 permits only when a person was actually
 asked.
+
+The reachability attempt is **bounded**, inheriting §9's rule that expiry is failure and
+never a hang: a router that cannot be reached within its timeout is unreachable, and the
+owner proceeds. A partition can therefore produce the same gate routed twice, and that
+is accepted rather than prevented — **two prompts, never two completions**. Both answers
+arrive at the owner as attestations (§7.3); the first to satisfy the gate resolves it and
+the second finds a terminal bead and is refused `not_terminal`. Preventing the duplicate
+prompt would need a lock across a partition, which is the thing a partition denies;
+making the duplicate harmless costs nothing and holds without coordination.
 
 ### 7.4 Version identity across stores
 

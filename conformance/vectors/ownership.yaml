@@ -21,7 +21,18 @@ vectors:
     actor_store: store-b
     run_owner: store-a
     may_flip: false
+    refusal: not_the_owner
     because: "a non-owner completing is the second authority §11.8 refused"
+
+  - id: own-refusal-is-spelled-not-the-owner
+    actor_store: store-b
+    run_owner: store-a
+    may_flip: false
+    refusal: not_the_owner
+    because: >-
+      The code is the contract's error language and the point of requiring a vector
+      for it. Asserting only the boolean lets one implementation ship `not_owner`
+      and still pass, which is the disagreement §9's naming passage exists to stop.
 
   - id: own-journal-may-not-flip
     actor_store: remote-plane

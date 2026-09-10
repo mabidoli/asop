@@ -109,8 +109,10 @@ several months, which is how this file came to be written.
 
 ## v3.4 — ownership (§7.2)
 
-`vectors/ownership.yaml` states the five outcomes an implementation must reach for the
-ownership decision itself. They are **document-level vectors**: they say what must be
+`vectors/ownership.yaml` states the six outcomes an implementation must reach for the
+ownership decision, one of which asserts the refusal is spelled `not_the_owner` — the
+runner fails a vector naming a code `asop.refusals` does not define, so an
+implementation shipping `not_owner` cannot pass. They are **document-level vectors**: they say what must be
 accepted or refused, not how a store proves it owns something.
 
 Not yet covered, and listed here rather than left for an adopter to discover — a suite
