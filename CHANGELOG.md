@@ -4,6 +4,50 @@ Version history for the ASOP specification. The specification itself is
 [`ASOP.md`](ASOP.md); this file is where it has been, so the specification can be
 about what it is.
 
+## v3.4 — 2026-09-10
+
+### The standalone store may be an embedded plane, and a run has one owner
+
+Two implementations of this contract drifted apart because each wrote its own lifecycle:
+two staged-gate implementations that could not consume each other's evidence, two registry
+readers, two answers to whether an unclaimed bead may be approved. §7 now says what it
+always meant — "a local ASOP store with the same contract" is a requirement about
+BEHAVIOUR, not an instruction to write a second implementation of it — and a harness MAY
+satisfy it by embedding a plane in-process.
+
+- **§7.1** Filing destination is a declared MODE — `local-only`, `remote-owned`,
+  `local-owned` — never inferred from whether a remote answered. §11.8's "the plane owns
+  the queue" is the `remote-owned` mode, unchanged and now named as such.
+- **§7.2** One run has exactly one owning store, fixed at filing, moved by no verb. Only
+  the owner flips its beads; anyone else is refused **`not_the_owner`** — a different
+  question from `not_the_holder`, which is about a lease. A non-owning plane receives a
+  **journal**: it may read, count, run the lessons pass and route gates, and may not
+  complete. Journal entries carry pinned step text, plan-vs-actual, divergence and
+  adjudication, and application is idempotent on run identity.
+- **§7.3** A plane may route a gate it does not own and may not answer it: the verdict
+  returns as an attestation and the owner re-checks before flipping. Routing fails open to
+  the owner, bounded by §9's expiry-is-failure-never-a-hang, and the duplicate a partition
+  can cause is made harmless rather than prevented — **two prompts, never two
+  completions**. A lock across a partition is what a partition denies.
+- **§7.4** A journalled run's pin means the OWNING store's ASOP. An unresolvable version
+  is counted separately, never folded in.
+- **§11.9** Whether an ASOP record replicates downward is OPEN. Both reviewers called it
+  non-blocking; the count-separately rule prevents the unsafe outcome meanwhile.
+
+### Distribution
+
+`asop-spec` **0.4.0**. New public API: `may_flip` and the `not_the_owner` code. 0.3.0
+(v3.2 + v3.3) stands as its own release.
+
+### Still open
+
+Mode persistence and immutability are stated as rules, not mechanised — no vector can see
+that a mode was declared rather than inferred. The journal's idempotency key, conflict
+behaviour and transaction boundary are prose. `may_flip` is the ownership DECISION, and
+the vectors cannot show it is consulted at the atomic status transition, which is where
+the guarantee holds or does not. All three are named in
+[`conformance/README.md`](conformance/README.md) rather than left to be discovered.
+
 ## v3.3 — 2026-09-10
 
 ### The registries have names

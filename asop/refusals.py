@@ -75,6 +75,7 @@ CODES: dict[str, str] = {
     "bad_ttl": "a lease TTL is not a positive integer within the registry's bound",
     "no_such_lease": "no lease exists for the given key",
     "not_the_holder": "the caller does not hold the lease it tried to act on",
+    "not_the_owner": "the store tried to flip a bead of a run another store owns; a lease is not authority over a run",
     # -- HTTP surface (agentco/app.py) ---------------------------------------
     "not_an_integer": "a query or body field expected to be an integer was not one",
     "bad_json": "the request body is not valid JSON, or not a JSON object",

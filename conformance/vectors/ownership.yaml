@@ -1,0 +1,53 @@
+# Conformance vectors — WHO may say a step is done?
+#
+# §7.2's single guarantee is that a store cannot complete a run it does not
+# own. A guarantee with no vector is one an implementation can claim and never
+# demonstrate, which is the gap this file closes.
+#
+# Ownership is not a lease. A store may hold a current lease on a bead of a run
+# it does not own; `not_the_holder` and `not_the_owner` answer different
+# questions and an implementation that conflates them will let a journal
+# complete somebody else's work.
+
+artifact: ownership
+vectors:
+  - id: own-owner-may-flip
+    actor_store: store-a
+    run_owner: store-a
+    may_flip: true
+    because: "the owning store is the one that flips; §9 puts enforcement in the owning domain"
+
+  - id: own-other-may-not-flip
+    actor_store: store-b
+    run_owner: store-a
+    may_flip: false
+    refusal: not_the_owner
+    because: "a non-owner completing is the second authority §11.8 refused"
+
+  - id: own-refusal-is-spelled-not-the-owner
+    actor_store: store-b
+    run_owner: store-a
+    may_flip: false
+    refusal: not_the_owner
+    because: >-
+      The code is the contract's error language and the point of requiring a vector
+      for it. Asserting only the boolean lets one implementation ship `not_owner`
+      and still pass, which is the disagreement §9's naming passage exists to stop.
+
+  - id: own-journal-may-not-flip
+    actor_store: remote-plane
+    run_owner: embedded-plane
+    may_flip: false
+    because: "a journal may read, count, route and run the lessons pass; it may not complete"
+
+  - id: own-unowned-is-not-everyones
+    actor_store: store-a
+    run_owner: null
+    may_flip: false
+    because: "an absent owner fails closed, the same posture as an undeclared registry"
+
+  - id: own-anonymous-store-may-not-flip
+    actor_store: null
+    run_owner: store-a
+    may_flip: false
+    because: "a store that cannot say who it is cannot be the owner"

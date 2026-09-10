@@ -22,6 +22,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from asop.errors import Refusal
 from asop.gates import gate_satisfied, validate_attestation, validate_gate
+from asop.refusals import CODES as REFUSAL_CODES
+from asop.revision import may_flip
 
 VECTORS = pathlib.Path(__file__).resolve().parents[1] / "vectors"
 SUBMITTER = "conformance-runner"
@@ -52,6 +54,19 @@ def run_one(artifact: str, vector: dict) -> tuple[bool, str]:
             if got != want:
                 return False, f"expected satisfied={want}, got {got}"
             return True, f"satisfied={got}"
+        elif artifact == "ownership":
+            # Not a document question either: given a run's owner and a store
+            # asking to flip one of its beads, may it? §7.2.
+            got = may_flip(vector["actor_store"], vector["run_owner"])
+            want = vector["may_flip"]
+            if got != want:
+                return False, f"expected may_flip={want}, got {got}"
+            expected_code = vector.get("refusal")
+            if expected_code and expected_code not in REFUSAL_CODES:
+                # The vector names a code the contract does not define. One
+                # implementation would ship `not_owner` and pass anyway.
+                return False, f"{expected_code!r} is not in asop.refusals"
+            return True, f"may_flip={got}" + (f" ({expected_code})" if expected_code else "")
         else:
             return False, f"runner does not know artifact {artifact!r}"
         got, code = "accept", None

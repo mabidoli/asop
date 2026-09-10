@@ -206,6 +206,21 @@ def may_adjudicate(
     return resolves(actor, adjudicators) or resolves(actor, humans)
 
 
+def may_flip(actor_store: Optional[str], run_owner: Optional[str]) -> bool:
+    """Whether this store may flip the status of a bead in that run (§7.2).
+
+    Ownership is fixed when the run is filed and no verb moves it. Only the
+    owning store completes, fails or parks a bead; every other store is
+    refused `not_the_owner` — a different question from `not_the_holder`,
+    which asks whether a lease is current. A store can hold a valid lease on
+    a bead of a run it does not own, and still not be the one who says the
+    step is done.
+
+    `None` on either side never matches. An unowned run is not everyone's.
+    """
+    return actor_store is not None and run_owner is not None and actor_store == run_owner
+
+
 def kind_of(actor: Optional[str], humans: Iterable[str]) -> str:
     """`human` if the operator declared this actor human; `agent` otherwise.
 

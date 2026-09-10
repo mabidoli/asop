@@ -105,3 +105,42 @@ Write it, then run it. A vector that has never been executed against a real
 implementation is the same unfalsifiable claim this suite replaced — the
 specification asserted conformance against a suite that did not exist for
 several months, which is how this file came to be written.
+
+
+## v3.4 — ownership (§7.2)
+
+`vectors/ownership.yaml` states the six outcomes an implementation must reach for the
+ownership decision, one of which asserts the refusal is spelled `not_the_owner` — the
+runner fails a vector naming a code `asop.refusals` does not define, so an
+implementation shipping `not_owner` cannot pass. They are **document-level vectors**: they say what must be
+accepted or refused, not how a store proves it owns something.
+
+Not yet covered, and listed here rather than left for an adopter to discover — a suite
+that hides its own coverage is what this file exists to prevent:
+
+- routing fail-open (§7.3): no vector exercises an unreachable router, because
+  reachability is not a property of a document.
+- mode transitions (§7.1): a vector cannot observe that a mode was declared rather than
+  inferred; only an implementation's own tests can.
+- version identity (§7.4): NO vector. The "counts it separately" rule is prose only, and
+  an earlier draft of this file claimed otherwise — a suite describing coverage it does
+  not have is worse than one admitting a gap, which is the whole reason this file exists.
+- journal application (§7.2): NO vector. Idempotency, conflicting deliveries and outcome
+  counting are all prose.
+- the guarantee vs the primitive: the vectors exercise `may_flip`, which is the ownership
+  DECISION. They cannot show that decision is actually consulted at the atomic bead-status
+  transition, after the lease, gate, pin and terminal-state checks. That integration is
+  where the guarantee either holds or does not, and only an implementation's own tests
+  reach it.
+
+
+## Running the suite
+
+The reference runner reads YAML, so it needs a YAML parser — which `asop-spec` itself
+does not depend on, deliberately: the package is stdlib-only and an adopter importing
+`asop` should not inherit a parser they did not ask for. Run it with one supplied:
+
+    uv run --with pyyaml python conformance/runner/python.py
+
+Vectors are data. An implementation in any language becomes conforming by reading them
+and comparing outcomes; nothing here obliges anyone to run this particular runner.
