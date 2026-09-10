@@ -132,3 +132,15 @@ that hides its own coverage is what this file exists to prevent:
   transition, after the lease, gate, pin and terminal-state checks. That integration is
   where the guarantee either holds or does not, and only an implementation's own tests
   reach it.
+
+
+## Running the suite
+
+The reference runner reads YAML, so it needs a YAML parser — which `asop-spec` itself
+does not depend on, deliberately: the package is stdlib-only and an adopter importing
+`asop` should not inherit a parser they did not ask for. Run it with one supplied:
+
+    uv run --with pyyaml python conformance/runner/python.py
+
+Vectors are data. An implementation in any language becomes conforming by reading them
+and comparing outcomes; nothing here obliges anyone to run this particular runner.

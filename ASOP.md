@@ -515,6 +515,11 @@ whether a remote answered:
 | `remote-owned` | the configured plane | the plane (§11.8, unchanged) |
 | `local-owned` | the local store | the local store; the plane receives a journal |
 
+**`remote-owned` is the default** when a plane is configured and the operator says
+nothing else; `local-only` is the default when none is. Defaults exist so that an
+operator who has not thought about modes still gets the behaviour §11.8 describes, which
+is the one the contract has always had.
+
 Reachability never changes the mode. A `remote-owned` harness that cannot reach its
 plane files nothing and says so; a `local-owned` harness files locally whether or not
 the plane is up. Inferring the destination from a health check is how one run comes to
