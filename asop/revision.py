@@ -74,9 +74,19 @@ LEGACY_PROTECTED_TAGS_ENV_VAR = "AGENTCO_PROTECTED_TAGS"
 #: them here, beside the ones v3.1 named, is the whole point: three independent
 #: implementations each read "the operator's declared registry" and each
 #: invented its own answer, which is the failure the standard exists to
-#: prevent. There is no legacy fallback because there is no legacy name.
+#: prevent.
+#:
+#: These DO get the deprecated fallback. An earlier draft of this said "there is
+#: no legacy fallback because there is no legacy name", which was wrong: the
+#: coordination plane had been reading `AGENTCO_VERIFIERS` and
+#: `AGENTCO_ADJUDICATORS` for weeks. Naming a variable a deployment is already
+#: setting, and then not reading it, is a rename that silently un-declares
+#: somebody's verifiers — which for this particular pair means quietly
+#: re-opening the capability the declaration exists to close.
 VERIFIERS_ENV_VAR = "ASOP_VERIFIERS"
 ADJUDICATORS_ENV_VAR = "ASOP_ADJUDICATORS"
+LEGACY_VERIFIERS_ENV_VAR = "AGENTCO_VERIFIERS"
+LEGACY_ADJUDICATORS_ENV_VAR = "AGENTCO_ADJUDICATORS"
 
 HUMAN = "human"
 AGENT = "agent"
@@ -144,12 +154,14 @@ def verifiers_from_env(value: Optional[str] = None) -> frozenset[str]:
     operator declaring who may verify should not have to learn a second format
     to declare who may judge.
     """
-    return _split(value if value is not None else os.environ.get(VERIFIERS_ENV_VAR))
+    return _split(value if value is not None else _from_env(
+        VERIFIERS_ENV_VAR, LEGACY_VERIFIERS_ENV_VAR))
 
 
 def adjudicators_from_env(value: Optional[str] = None) -> frozenset[str]:
     """The declared adjudicator routes (§6.1). Comma-separated, exact spelling."""
-    return _split(value if value is not None else os.environ.get(ADJUDICATORS_ENV_VAR))
+    return _split(value if value is not None else _from_env(
+        ADJUDICATORS_ENV_VAR, LEGACY_ADJUDICATORS_ENV_VAR))
 
 
 def resolves(actor: Optional[str], registry: Iterable[str]) -> bool:

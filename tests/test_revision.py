@@ -339,3 +339,20 @@ def test_a_declared_route_adjudicates_alongside_the_human(monkeypatch):
     assert may_adjudicate("reviewer-route", adj, humans) is True
     assert may_adjudicate("mabidoli", adj, humans) is True
     assert may_adjudicate("unlisted", adj, humans) is False
+
+
+def test_the_verifier_registry_reads_the_legacy_name_too(monkeypatch):
+    """The plane had been setting AGENTCO_VERIFIERS for weeks. Naming a
+    variable somebody already sets and then not reading it is a rename that
+    silently un-declares their verifiers."""
+    monkeypatch.delenv("ASOP_VERIFIERS", raising=False)
+    monkeypatch.setenv("AGENTCO_VERIFIERS", "reviewer-a")
+    assert verifiers_from_env() == {"reviewer-a"}
+    monkeypatch.setenv("ASOP_VERIFIERS", "reviewer-b")
+    assert verifiers_from_env() == {"reviewer-b"}, "the standard's name wins"
+
+
+def test_a_deliberately_empty_declaration_is_not_overridden(monkeypatch):
+    monkeypatch.setenv("ASOP_VERIFIERS", "")
+    monkeypatch.setenv("AGENTCO_VERIFIERS", "reviewer-a")
+    assert verifiers_from_env() == frozenset()
