@@ -501,28 +501,65 @@ publishes without a human-visible prompt. Its local store is the standalone path
 contract" is a requirement about behaviour, not about writing a second implementation of
 it — and writing one is how implementations drift. A harness MAY satisfy its local store
 by embedding a plane in-process, and doing so is the recommended shape: one lifecycle,
-one set of gate semantics, one answer to a staged ladder. Nothing about the connected
-case changes, because an embedded plane is not a configured plane; it is this harness's
-store, and §9's rule that enforcement happens in the domain owning the bead already
-describes it.
+one set of gate semantics, one answer to a staged ladder.
 
-**One run has exactly one owning store, decided at filing and never moved.** This is what
-makes an embedded plane and a remote plane coexist without §11.8's objection — that
-outcomes for runs the plane did not file leave two queues to agree about one run. They
-never agree, because they never both own one:
+### 7.1 Filing destination, declared not inferred
 
-- A run **filed on the remote plane** is owned there. The harness pulls, executes,
-  reports and attests. Unchanged from §11.8.
-- A run **filed locally** is owned locally for its whole life. The remote receives it as
-  a **journal**: it may read, count, run the lessons pass and route human gates against
-  it, and it may not complete a step of it. A journal that could complete would be a
-  second authority over one run, which is the thing being avoided.
+A harness is in exactly one **mode**, declared by the operator, never deduced from
+whether a remote answered:
 
-Ownership is a property of the run, recorded when it is filed, and no verb moves it. A
-harness with a remote configured therefore still works when that remote is unreachable —
-it files locally, owns what it filed, and journals it upward when the remote returns.
-That is what "never blocks a harness" means in practice, and it is now literal rather
-than aspirational.
+| mode | where runs are filed | who owns them |
+|---|---|---|
+| `local-only` | the local store | the local store |
+| `remote-owned` | the configured plane | the plane (§11.8, unchanged) |
+| `local-owned` | the local store | the local store; the plane receives a journal |
+
+Reachability never changes the mode. A `remote-owned` harness that cannot reach its
+plane files nothing and says so; a `local-owned` harness files locally whether or not
+the plane is up. Inferring the destination from a health check is how one run comes to
+exist in two places, which is the failure §11.8 refused.
+
+### 7.2 One run, one owner
+
+Ownership is recorded on the run when it is filed and no verb moves it. The store that
+owns a run is the only one that may flip the status of its beads; any other store
+attempting it is refused **`not_the_owner`** (§10) — a distinct code from
+`not_the_holder`, which is about a lease, not about authority.
+
+A **journal** is what a non-owning plane receives: it may read, count, run the lessons
+pass and route human gates, and it may not complete a step. To be useful to the lessons
+pass a journal entry carries the pinned `(asop_id, version, step)`, the step text the
+executor was handed, the plan-vs-actual review, any divergence and adjudication records,
+and the terminal status with its evidence — not a bare outcome.
+
+Journal application is **idempotent on run and bead identity**: an entry already applied
+is accepted and changes nothing. Reconnection after a partition is at-least-once
+delivery, and `outcomes_by_version` must not count a run twice because it was delivered
+twice.
+
+### 7.3 Answering a gate you do not own
+
+A plane may **route** a human or judged gate for a run it does not own — that is what a
+coordination layer is for. It may not **answer** it. The verdict returns to the owning
+store as an attestation (§5.3), and the owning store re-checks the pinned bead, its
+gate, the registry and the terminal status before it flips anything. Enforcement stays
+in the domain that owns the bead, exactly as §9 says.
+
+Routing **fails open to the owner**: if the plane that would route a gate is
+unreachable, the owning store routes it itself. An embedded plane is a whole plane and
+can. Without this, a remote outage silently converts a human gate into an `on_timeout`
+resolution — decided by omission, which §9 permits only when a person was actually
+asked.
+
+### 7.4 Version identity across stores
+
+A journalled run pins `(asop_id, version)`, and that pin means the ASOP the OWNING store
+activated. Two stores may hold different procedures under one `asop_id`. A plane
+receiving a journal entry for a version it cannot resolve stores it and counts it
+separately; it does not fold those outcomes into its own version's row, and it does not
+silently treat them as the same procedure. Whether an ASOP record itself should
+replicate downward to embedded planes, and under whose activation, is **open** — see
+§11.9.
 
 A harness is **conforming** when it passes the vectors in
 [`conformance/vectors/`](conformance/vectors/) against its own validators.
@@ -690,6 +727,7 @@ stack trace. Codes relevant to ASOPs, from `asop.refusals`, plus the ones v3 add
 | `work_conflict` / `not_the_holder` / `attempt_required` | fenced-lease rules |
 | `capability_mismatch` | the caller's binding is not eligible for the step's role |
 | `attestation_required` / `attestation_invalid` | §5.3 — invalid also covers a `judged`/`human` attestation with no `verdict`, or one not tied to the gate's `check` |
+| **`not_the_owner`** *(v3.4)* | a store tried to flip a bead of a run another store owns (§7.2). Distinct from `not_the_holder`, which is about a lease rather than about authority |
 | **`unauthenticated`** *(v3.2)* | a claimed adjudicator, verifier, or judge identity does not resolve against the operator's declared registry (§5.3, §6.1, §9) |
 | `not_terminal` | a verdict on a bead that is not parked |
 | `metadata_reserved` / `natural_key_reserved` | a caller wrote a plane-owned key |
@@ -766,6 +804,17 @@ stack trace. Codes relevant to ASOPs, from `asop.refusals`, plus the ones v3 add
    a new ASOP, or a new version of an existing one, for a human to validate. The
    threshold is a harness number, not a contract number. The line that does not move:
    agents may draft, only humans activate.
+
+---
+
+9. **Does an ASOP record replicate downward?** **OPEN (v3.4).** §7.4 says a plane
+   receiving a journal entry for a version it cannot resolve counts it separately rather
+   than folding it in. That is safe but partial: it leaves an operator running many
+   embedded planes with no way to distribute one procedure to all of them except by
+   copying it, and copies drift, which is what this contract exists to stop. The
+   candidates are replication with the remote as the activation authority, or pull-on-pin
+   where an embedded plane fetches the version a journalled run names. Both need the
+   revision policy (§6.4) to hold across the hop, and neither is decided.
 
 ---
 

@@ -28,6 +28,7 @@ from asop.revision import (
     adjudicators_from_env,
     resolves,
     may_adjudicate,
+    may_flip,
     kind_of,
     protected_tags_from_env,
     require_human,
@@ -356,3 +357,13 @@ def test_a_deliberately_empty_declaration_is_not_overridden(monkeypatch):
     monkeypatch.setenv("ASOP_VERIFIERS", "")
     monkeypatch.setenv("AGENTCO_VERIFIERS", "reviewer-a")
     assert verifiers_from_env() == frozenset()
+
+
+def test_only_the_owning_store_may_flip_a_bead():
+    """§7.2. Not a lease question — a store can hold a current lease on a bead
+    of a run it does not own and still not be the one who says it is done."""
+    assert may_flip("store-a", "store-a") is True
+    assert may_flip("store-b", "store-a") is False
+    assert may_flip("remote-plane", "embedded-plane") is False
+    assert may_flip("store-a", None) is False     # unowned is not everyone's
+    assert may_flip(None, "store-a") is False     # anonymous cannot be owner

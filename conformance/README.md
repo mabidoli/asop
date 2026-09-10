@@ -105,3 +105,20 @@ Write it, then run it. A vector that has never been executed against a real
 implementation is the same unfalsifiable claim this suite replaced — the
 specification asserted conformance against a suite that did not exist for
 several months, which is how this file came to be written.
+
+
+## v3.4 — ownership (§7.2)
+
+`vectors/ownership.yaml` states the six outcomes an implementation must reach for run
+ownership and the journal. They are **document-level vectors**: they say what must be
+accepted or refused, not how a store proves it owns something.
+
+Not yet covered, and listed here rather than left for an adopter to discover — a suite
+that hides its own coverage is what this file exists to prevent:
+
+- routing fail-open (§7.3): no vector exercises an unreachable router, because
+  reachability is not a property of a document.
+- mode transitions (§7.1): a vector cannot observe that a mode was declared rather than
+  inferred; only an implementation's own tests can.
+- version identity (§7.4): the "counts it separately" rule has a vector; the open
+  question in §11.9 about replicating an ASOP downward has none, because it is undecided.
