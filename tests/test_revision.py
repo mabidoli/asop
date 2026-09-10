@@ -24,6 +24,10 @@ from asop.revision import (
     RevisionPolicyError,
     check_asop_revision,
     humans_from_env,
+    verifiers_from_env,
+    adjudicators_from_env,
+    resolves,
+    may_adjudicate,
     kind_of,
     protected_tags_from_env,
     require_human,
@@ -281,3 +285,74 @@ def test_a_reviser_kind_that_is_neither_is_a_programming_error():
     v1 = record([step("pay")])
     with pytest.raises(ValueError, match="reviser_kind"):
         check([v1], v1, v1, "superuser")
+
+
+# ------------------------------- the registries v3.2 required and did not name
+
+def test_an_undeclared_verifier_registry_resolves_nobody(monkeypatch):
+    """The permissive reading — empty means everyone — is the one all three
+    implementations reached for, and it turns the rule into a decoration."""
+    monkeypatch.delenv("ASOP_VERIFIERS", raising=False)
+    assert verifiers_from_env() == frozenset()
+    assert resolves("some-route", verifiers_from_env()) is False
+
+
+def test_a_declared_verifier_resolves_and_nobody_else_does(monkeypatch):
+    monkeypatch.setenv("ASOP_VERIFIERS", "reviewer-a, reviewer-b")
+    declared = verifiers_from_env()
+    assert declared == {"reviewer-a", "reviewer-b"}
+    assert resolves("reviewer-a", declared) is True
+    assert resolves("the-executor", declared) is False
+    assert resolves(None, declared) is False           # unauthenticated: fail closed
+
+
+def test_adjudicators_are_declared_separately_from_verifiers(monkeypatch):
+    """Answering a gate and judging a divergence are different authorities
+    (§5.3 vs §6.1); one declaration must not silently grant the other."""
+    monkeypatch.setenv("ASOP_VERIFIERS", "reviewer-a")
+    monkeypatch.setenv("ASOP_ADJUDICATORS", "owner")
+    assert resolves("reviewer-a", adjudicators_from_env()) is False
+    assert resolves("owner", adjudicators_from_env()) is True
+    assert resolves("owner", verifiers_from_env()) is False
+
+
+def test_the_registry_format_matches_the_one_operators_already_know(monkeypatch):
+    monkeypatch.setenv("ASOP_VERIFIERS", " reviewer-a ,, reviewer-b ")
+    assert verifiers_from_env() == {"reviewer-a", "reviewer-b"}
+
+
+def test_an_empty_adjudicator_registry_leaves_the_operator(monkeypatch):
+    """Section 6.1's posture: empty means human-only, not nobody. Using plain
+    resolves() here would refuse the operator their own loop."""
+    monkeypatch.setenv("ASOP_HUMANS", "mabidoli")
+    monkeypatch.delenv("ASOP_ADJUDICATORS", raising=False)
+    humans, adj = humans_from_env(), adjudicators_from_env()
+    assert may_adjudicate("mabidoli", adj, humans) is True
+    assert may_adjudicate("some-route", adj, humans) is False
+    assert may_adjudicate(None, adj, humans) is False
+
+
+def test_a_declared_route_adjudicates_alongside_the_human(monkeypatch):
+    monkeypatch.setenv("ASOP_HUMANS", "mabidoli")
+    monkeypatch.setenv("ASOP_ADJUDICATORS", "reviewer-route")
+    humans, adj = humans_from_env(), adjudicators_from_env()
+    assert may_adjudicate("reviewer-route", adj, humans) is True
+    assert may_adjudicate("mabidoli", adj, humans) is True
+    assert may_adjudicate("unlisted", adj, humans) is False
+
+
+def test_the_verifier_registry_reads_the_legacy_name_too(monkeypatch):
+    """The plane had been setting AGENTCO_VERIFIERS for weeks. Naming a
+    variable somebody already sets and then not reading it is a rename that
+    silently un-declares their verifiers."""
+    monkeypatch.delenv("ASOP_VERIFIERS", raising=False)
+    monkeypatch.setenv("AGENTCO_VERIFIERS", "reviewer-a")
+    assert verifiers_from_env() == {"reviewer-a"}
+    monkeypatch.setenv("ASOP_VERIFIERS", "reviewer-b")
+    assert verifiers_from_env() == {"reviewer-b"}, "the standard's name wins"
+
+
+def test_a_deliberately_empty_declaration_is_not_overridden(monkeypatch):
+    monkeypatch.setenv("ASOP_VERIFIERS", "")
+    monkeypatch.setenv("AGENTCO_VERIFIERS", "reviewer-a")
+    assert verifiers_from_env() == frozenset()

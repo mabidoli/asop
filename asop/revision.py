@@ -70,6 +70,24 @@ PROTECTED_TAGS_ENV_VAR = "ASOP_PROTECTED_TAGS"
 LEGACY_HUMANS_ENV_VAR = "AGENTCO_HUMANS"
 LEGACY_PROTECTED_TAGS_ENV_VAR = "AGENTCO_PROTECTED_TAGS"
 
+#: The two registries v3.2 requires and did not name (§5.3, §6.1, §9). Naming
+#: them here, beside the ones v3.1 named, is the whole point: three independent
+#: implementations each read "the operator's declared registry" and each
+#: invented its own answer, which is the failure the standard exists to
+#: prevent.
+#:
+#: These DO get the deprecated fallback. An earlier draft of this said "there is
+#: no legacy fallback because there is no legacy name", which was wrong: the
+#: coordination plane had been reading `AGENTCO_VERIFIERS` and
+#: `AGENTCO_ADJUDICATORS` for weeks. Naming a variable a deployment is already
+#: setting, and then not reading it, is a rename that silently un-declares
+#: somebody's verifiers — which for this particular pair means quietly
+#: re-opening the capability the declaration exists to close.
+VERIFIERS_ENV_VAR = "ASOP_VERIFIERS"
+ADJUDICATORS_ENV_VAR = "ASOP_ADJUDICATORS"
+LEGACY_VERIFIERS_ENV_VAR = "AGENTCO_VERIFIERS"
+LEGACY_ADJUDICATORS_ENV_VAR = "AGENTCO_ADJUDICATORS"
+
 HUMAN = "human"
 AGENT = "agent"
 KINDS = (HUMAN, AGENT)
@@ -127,6 +145,65 @@ def protected_tags_from_env(value: Optional[str] = None) -> frozenset[str]:
         else _from_env(PROTECTED_TAGS_ENV_VAR, LEGACY_PROTECTED_TAGS_ENV_VAR)
     )
     return DEFAULT_PROTECTED_TAGS | frozenset(tag.lower() for tag in extra)
+
+
+def verifiers_from_env(value: Optional[str] = None) -> frozenset[str]:
+    """The declared verifier routes. Comma-separated, exact spelling.
+
+    Same shape and same spelling rule as `humans_from_env`, deliberately: an
+    operator declaring who may verify should not have to learn a second format
+    to declare who may judge.
+    """
+    return _split(value if value is not None else _from_env(
+        VERIFIERS_ENV_VAR, LEGACY_VERIFIERS_ENV_VAR))
+
+
+def adjudicators_from_env(value: Optional[str] = None) -> frozenset[str]:
+    """The declared adjudicator routes (§6.1). Comma-separated, exact spelling."""
+    return _split(value if value is not None else _from_env(
+        ADJUDICATORS_ENV_VAR, LEGACY_ADJUDICATORS_ENV_VAR))
+
+
+def resolves(actor: Optional[str], registry: Iterable[str]) -> bool:
+    """Whether a claimed identity resolves against an operator's declaration.
+
+    The whole rule in one place, because v3.2 states it in prose three times
+    and three implementations still got it wrong the same way:
+
+    - An **empty or undeclared** registry resolves NOBODY. Not everybody. The
+      permissive reading is the one every implementation reached for, and it
+      turns "declared, never inferred" into a decoration — the caller's word
+      becomes the credential.
+    - `None` — an unauthenticated caller — never resolves.
+
+    This does not authenticate anyone. Authentication is the transport's job
+    (`submitted_by` is set from the authenticated actor, never copied from a
+    body that claims otherwise). This answers the question that comes after:
+    given an actor the transport has already authenticated, did the operator
+    declare them for this role.
+    """
+    return actor is not None and actor in set(registry)
+
+
+def may_adjudicate(
+    actor: Optional[str],
+    adjudicators: Iterable[str],
+    humans: Iterable[str],
+) -> bool:
+    """Whether this actor may adjudicate a divergence (ASOP.md §6.1).
+
+    Deliberately NOT plain `resolves()` against the adjudicator registry. §6.1's
+    rule is that an empty registry leaves the OPERATOR as the only adjudicator —
+    a declared human adjudicates by being human, and the registry is how a
+    *route* is opted in on top of that. An implementation that used `resolves()`
+    here would refuse its own operator the moment they had not also listed
+    themselves as a route, and the human-only default — the posture §6.1 starts
+    from — would be unreachable.
+
+    The executor check is separate and still applies: this says who MAY
+    adjudicate, never that they may adjudicate their own step.
+    """
+    return resolves(actor, adjudicators) or resolves(actor, humans)
 
 
 def kind_of(actor: Optional[str], humans: Iterable[str]) -> str:

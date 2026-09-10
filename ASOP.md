@@ -5,8 +5,8 @@
 > other than the one that did the work, and revised from the evidence its own
 > runs produce.*
 
-**Status:** v3.2 — v3's seven review questions (§11) stand as decided 2026-09-04;
-v3.1 and v3.2 are corrections ([`CHANGELOG.md`](CHANGELOG.md)).
+**Status:** v3.3 — v3's seven review questions (§11) stand as decided 2026-09-04;
+v3.1, v3.2 and v3.3 are corrections ([`CHANGELOG.md`](CHANGELOG.md)).
 Supersedes v2.
 **Home:** this repository — the specification, its normative [schema](schema/v1/), its
 [conformance vectors](conformance/) and a reference implementation. Distributed as
@@ -583,6 +583,54 @@ the operator's declared registry (§5.3, §6.1) before its attestation is accept
 resolving a claim is the store's job, at the same choke point that flips a bead's status,
 not a convention the caller is trusted to honour. A registry with nothing declared
 authenticates nobody; there is no fallback that authenticates everybody.
+
+**The registries have names.** Saying "the operator's declared registry" and stopping
+was the same mistake one level up: three implementations read that sentence and invented
+three answers. The declarations are, alongside the two §6.4 already names:
+
+| declaration | variable | who it names |
+|---|---|---|
+| humans | `ASOP_HUMANS` | actors the revision policy treats as human (§6.4) |
+| protected tags | `ASOP_PROTECTED_TAGS` | tags that freeze a step against agents (§6.4) |
+| **verifiers** | **`ASOP_VERIFIERS`** | routes that may answer a `judged` or `human` gate (§5.3) |
+| **adjudicators** | **`ASOP_ADJUDICATORS`** | routes that may adjudicate a divergence (§6.1) |
+
+Comma-separated actor names, matched on exact spelling — the same format and the same
+rule as `ASOP_HUMANS`, so an operator declaring who may verify does not have to learn a
+second syntax to declare who may judge. `asop.revision` ships `verifiers_from_env`,
+`adjudicators_from_env`, `resolves(actor, registry)` and `may_adjudicate(...)` so that
+two implementations reading the same declaration cannot disagree about what it says.
+
+**What an empty registry means, exactly** — because the loose reading of this is what
+§6.1 and this section were caught disagreeing about. These registries declare **routes**,
+not people. An empty registry therefore grants **no route** the authority; it does not
+grant everyone the authority, and it does not withdraw it from the operator:
+
+- **Verification.** An empty `ASOP_VERIFIERS` resolves nobody. A `judged` gate with no
+  declared route cannot be answered by a route at all; it waits for a person, which is
+  what a `human` gate already is.
+- **Adjudication.** An empty `ASOP_ADJUDICATORS` leaves the operator as the only
+  adjudicator — the reading §6.1 has always had. A declared human adjudicates *by being
+  human*, not by also appearing in the adjudicator registry; the registry is how a
+  **route** is opted in, and the human-only posture is the default it starts from.
+
+So `resolves()` answers one question — did the operator declare this route — and
+`may_adjudicate(actor, adjudicators, humans)` answers the one §6.1 actually asks, which
+is that question **or** whether the actor is a declared human. An implementation that
+uses the first where the second is meant will refuse its own operator.
+
+**Authentication is the transport's, resolution is the store's.** These are two
+questions and conflating them is how the permissive reading gets in. The transport
+answers *who is calling* — `submitted_by` is set from the authenticated actor, never
+copied from a body that claims otherwise. The store then answers *did the operator
+declare them for this role*, at the choke point where it flips the status.
+
+The **reference validator does neither**. It checks that a record is well formed and
+that it attests to the gate it claims to; it is handed an already-authenticated
+submitter and resolves no registries. Both questions are the integrator's, and a
+conforming implementation is not excused from them by the validator accepting a
+document — a valid attestation from an undeclared route is a valid document and an
+unauthorised answer.
 
 **Execution contract for `deterministic` checks.** Per gate, an implementation pins:
 identity (which principal runs the check), environment (working directory and permitted
