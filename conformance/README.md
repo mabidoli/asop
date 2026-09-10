@@ -109,8 +109,8 @@ several months, which is how this file came to be written.
 
 ## v3.4 — ownership (§7.2)
 
-`vectors/ownership.yaml` states the six outcomes an implementation must reach for run
-ownership and the journal. They are **document-level vectors**: they say what must be
+`vectors/ownership.yaml` states the five outcomes an implementation must reach for the
+ownership decision itself. They are **document-level vectors**: they say what must be
 accepted or refused, not how a store proves it owns something.
 
 Not yet covered, and listed here rather than left for an adopter to discover — a suite
@@ -120,5 +120,13 @@ that hides its own coverage is what this file exists to prevent:
   reachability is not a property of a document.
 - mode transitions (§7.1): a vector cannot observe that a mode was declared rather than
   inferred; only an implementation's own tests can.
-- version identity (§7.4): the "counts it separately" rule has a vector; the open
-  question in §11.9 about replicating an ASOP downward has none, because it is undecided.
+- version identity (§7.4): NO vector. The "counts it separately" rule is prose only, and
+  an earlier draft of this file claimed otherwise — a suite describing coverage it does
+  not have is worse than one admitting a gap, which is the whole reason this file exists.
+- journal application (§7.2): NO vector. Idempotency, conflicting deliveries and outcome
+  counting are all prose.
+- the guarantee vs the primitive: the vectors exercise `may_flip`, which is the ownership
+  DECISION. They cannot show that decision is actually consulted at the atomic bead-status
+  transition, after the lease, gate, pin and terminal-state checks. That integration is
+  where the guarantee either holds or does not, and only an implementation's own tests
+  reach it.
