@@ -4,7 +4,7 @@ Version history for the ASOP specification. The specification itself is
 [`ASOP.md`](ASOP.md); this file is where it has been, so the specification can be
 about what it is.
 
-## Unreleased
+## v3.3 — 2026-09-10
 
 ### The registries have names
 
@@ -27,6 +27,18 @@ Three implementations read that sentence; three invented their own answer.
 
 Answering a gate and adjudicating a divergence are declared separately, because they
 are different authorities (§5.3 vs §6.1) and one should not silently grant the other.
+
+### Distribution
+
+`asop-spec` **0.3.0** carries both v3.2 and v3.3. v3.2 announced 0.3.0 and the release was
+never cut — PyPI stayed at 0.2.0 — so rather than ship a phantom 0.3.0 for v3.2 and a 0.4.0
+minutes later, one minor release carries both. Nothing depended on 0.3.0 meaning v3.2,
+because nothing could: it was never there to depend on.
+
+New public API in this release: `verifiers_from_env`, `adjudicators_from_env`, `resolves`,
+`may_adjudicate`, and the four `*_ENV_VAR` constants. Two new variables are read
+(`ASOP_VERIFIERS`, `ASOP_ADJUDICATORS`), each with the `AGENTCO_*` name as a deprecated
+fallback.
 
 ## v3.2 — 2026-09-09
 

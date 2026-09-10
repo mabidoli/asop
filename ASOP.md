@@ -5,8 +5,8 @@
 > other than the one that did the work, and revised from the evidence its own
 > runs produce.*
 
-**Status:** v3.2 — v3's seven review questions (§11) stand as decided 2026-09-04;
-v3.1 and v3.2 are corrections ([`CHANGELOG.md`](CHANGELOG.md)).
+**Status:** v3.3 — v3's seven review questions (§11) stand as decided 2026-09-04;
+v3.1, v3.2 and v3.3 are corrections ([`CHANGELOG.md`](CHANGELOG.md)).
 Supersedes v2.
 **Home:** this repository — the specification, its normative [schema](schema/v1/), its
 [conformance vectors](conformance/) and a reference implementation. Distributed as
