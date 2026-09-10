@@ -584,6 +584,31 @@ resolving a claim is the store's job, at the same choke point that flips a bead'
 not a convention the caller is trusted to honour. A registry with nothing declared
 authenticates nobody; there is no fallback that authenticates everybody.
 
+**The registries have names.** Saying "the operator's declared registry" and stopping
+was the same mistake one level up: three implementations read that sentence and invented
+three answers. The declarations are, alongside the two §6.4 already names:
+
+| declaration | variable | who it names |
+|---|---|---|
+| humans | `ASOP_HUMANS` | actors the revision policy treats as human (§6.4) |
+| protected tags | `ASOP_PROTECTED_TAGS` | tags that freeze a step against agents (§6.4) |
+| **verifiers** | **`ASOP_VERIFIERS`** | routes that may answer a `judged` or `human` gate (§5.3) |
+| **adjudicators** | **`ASOP_ADJUDICATORS`** | routes that may adjudicate a divergence (§6.1) |
+
+Comma-separated actor names, matched on exact spelling — the same format and the same
+rule as `ASOP_HUMANS`, so an operator declaring who may verify does not have to learn a
+second syntax to declare who may judge. Unset and empty are the same thing and both
+resolve **nobody**. `asop.revision` ships `verifiers_from_env`, `adjudicators_from_env`
+and `resolves(actor, registry)` so that two implementations reading the same declaration
+cannot disagree about what it says.
+
+**Authentication is the transport's, resolution is the store's.** These are two
+questions and conflating them is how the permissive reading gets in. The transport
+answers *who is calling* — `submitted_by` is set from the authenticated actor, never
+copied from a body that claims otherwise. The store then answers *did the operator
+declare them for this role*. The reference validator does the second only; it is handed
+an already-authenticated submitter and resolves no registries itself.
+
 **Execution contract for `deterministic` checks.** Per gate, an implementation pins:
 identity (which principal runs the check), environment (working directory and permitted
 secrets — no ambient credentials), isolation (the check cannot rewrite the record it

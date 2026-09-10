@@ -6,7 +6,27 @@ about what it is.
 
 ## Unreleased
 
-_Nothing yet._
+### The registries have names
+
+v3.2 required a claimed verifier or adjudicator to resolve against "the operator's
+declared registry" and never said what that registry is called — the same
+name-the-invariant-but-not-the-mechanism gap it was written to close, one level up.
+Three implementations read that sentence; three invented their own answer.
+
+- `ASOP_VERIFIERS` and `ASOP_ADJUDICATORS`, alongside the `ASOP_HUMANS` /
+  `ASOP_PROTECTED_TAGS` that v3.1 named. Same comma-separated format, same
+  exact-spelling match, so an operator declaring who may verify does not learn a
+  second syntax to declare who may judge. No legacy fallback: there is no legacy name.
+- `asop.revision.verifiers_from_env`, `adjudicators_from_env`, and
+  `resolves(actor, registry)` — the rule in one place, so two implementations reading
+  the same declaration cannot disagree about what it says. Unset and empty both
+  resolve nobody; `None` never resolves.
+- §9 now separates the two questions that were being conflated: the transport answers
+  *who is calling*, the store answers *did the operator declare them for this role*.
+  The reference validator still does only the second.
+
+Answering a gate and adjudicating a divergence are declared separately, because they
+are different authorities (§5.3 vs §6.1) and one should not silently grant the other.
 
 ## v3.2 — 2026-09-09
 
@@ -36,7 +56,9 @@ shape moved, and `ASOP_VERSION` stays at `3`.
 
 `asop-spec` 0.3.0 — minor rather than patch. An attestation that used to pass with a bare
 name now needs a resolvable identity and a verdict; anyone who had accepted the former
-will see new refusals.
+will see new refusals. (`pyproject.toml` carried `0.2.0` until this was reconciled: the
+changelog announced a version the package did not claim, and both consumers were still
+locked at `0.1.0`.)
 
 ### Still open
 

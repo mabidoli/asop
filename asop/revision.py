@@ -70,6 +70,14 @@ PROTECTED_TAGS_ENV_VAR = "ASOP_PROTECTED_TAGS"
 LEGACY_HUMANS_ENV_VAR = "AGENTCO_HUMANS"
 LEGACY_PROTECTED_TAGS_ENV_VAR = "AGENTCO_PROTECTED_TAGS"
 
+#: The two registries v3.2 requires and did not name (§5.3, §6.1, §9). Naming
+#: them here, beside the ones v3.1 named, is the whole point: three independent
+#: implementations each read "the operator's declared registry" and each
+#: invented its own answer, which is the failure the standard exists to
+#: prevent. There is no legacy fallback because there is no legacy name.
+VERIFIERS_ENV_VAR = "ASOP_VERIFIERS"
+ADJUDICATORS_ENV_VAR = "ASOP_ADJUDICATORS"
+
 HUMAN = "human"
 AGENT = "agent"
 KINDS = (HUMAN, AGENT)
@@ -127,6 +135,42 @@ def protected_tags_from_env(value: Optional[str] = None) -> frozenset[str]:
         else _from_env(PROTECTED_TAGS_ENV_VAR, LEGACY_PROTECTED_TAGS_ENV_VAR)
     )
     return DEFAULT_PROTECTED_TAGS | frozenset(tag.lower() for tag in extra)
+
+
+def verifiers_from_env(value: Optional[str] = None) -> frozenset[str]:
+    """The declared verifier routes. Comma-separated, exact spelling.
+
+    Same shape and same spelling rule as `humans_from_env`, deliberately: an
+    operator declaring who may verify should not have to learn a second format
+    to declare who may judge.
+    """
+    return _split(value if value is not None else os.environ.get(VERIFIERS_ENV_VAR))
+
+
+def adjudicators_from_env(value: Optional[str] = None) -> frozenset[str]:
+    """The declared adjudicator routes (§6.1). Comma-separated, exact spelling."""
+    return _split(value if value is not None else os.environ.get(ADJUDICATORS_ENV_VAR))
+
+
+def resolves(actor: Optional[str], registry: Iterable[str]) -> bool:
+    """Whether a claimed identity resolves against an operator's declaration.
+
+    The whole rule in one place, because v3.2 states it in prose three times
+    and three implementations still got it wrong the same way:
+
+    - An **empty or undeclared** registry resolves NOBODY. Not everybody. The
+      permissive reading is the one every implementation reached for, and it
+      turns "declared, never inferred" into a decoration — the caller's word
+      becomes the credential.
+    - `None` — an unauthenticated caller — never resolves.
+
+    This does not authenticate anyone. Authentication is the transport's job
+    (`submitted_by` is set from the authenticated actor, never copied from a
+    body that claims otherwise). This answers the question that comes after:
+    given an actor the transport has already authenticated, did the operator
+    declare them for this role.
+    """
+    return actor is not None and actor in set(registry)
 
 
 def kind_of(actor: Optional[str], humans: Iterable[str]) -> str:

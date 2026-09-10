@@ -24,6 +24,9 @@ from asop.revision import (
     RevisionPolicyError,
     check_asop_revision,
     humans_from_env,
+    verifiers_from_env,
+    adjudicators_from_env,
+    resolves,
     kind_of,
     protected_tags_from_env,
     require_human,
@@ -281,3 +284,37 @@ def test_a_reviser_kind_that_is_neither_is_a_programming_error():
     v1 = record([step("pay")])
     with pytest.raises(ValueError, match="reviser_kind"):
         check([v1], v1, v1, "superuser")
+
+
+# ------------------------------- the registries v3.2 required and did not name
+
+def test_an_undeclared_verifier_registry_resolves_nobody(monkeypatch):
+    """The permissive reading — empty means everyone — is the one all three
+    implementations reached for, and it turns the rule into a decoration."""
+    monkeypatch.delenv("ASOP_VERIFIERS", raising=False)
+    assert verifiers_from_env() == frozenset()
+    assert resolves("some-route", verifiers_from_env()) is False
+
+
+def test_a_declared_verifier_resolves_and_nobody_else_does(monkeypatch):
+    monkeypatch.setenv("ASOP_VERIFIERS", "reviewer-a, reviewer-b")
+    declared = verifiers_from_env()
+    assert declared == {"reviewer-a", "reviewer-b"}
+    assert resolves("reviewer-a", declared) is True
+    assert resolves("the-executor", declared) is False
+    assert resolves(None, declared) is False           # unauthenticated: fail closed
+
+
+def test_adjudicators_are_declared_separately_from_verifiers(monkeypatch):
+    """Answering a gate and judging a divergence are different authorities
+    (§5.3 vs §6.1); one declaration must not silently grant the other."""
+    monkeypatch.setenv("ASOP_VERIFIERS", "reviewer-a")
+    monkeypatch.setenv("ASOP_ADJUDICATORS", "owner")
+    assert resolves("reviewer-a", adjudicators_from_env()) is False
+    assert resolves("owner", adjudicators_from_env()) is True
+    assert resolves("owner", verifiers_from_env()) is False
+
+
+def test_the_registry_format_matches_the_one_operators_already_know(monkeypatch):
+    monkeypatch.setenv("ASOP_VERIFIERS", " reviewer-a ,, reviewer-b ")
+    assert verifiers_from_env() == {"reviewer-a", "reviewer-b"}
