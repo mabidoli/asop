@@ -101,6 +101,18 @@ package is imported by every side of the contract, so a dependency taken here is
 forced on everyone who speaks it. A standard that drags a dependency tree behind
 it is a framework wearing a standard's clothes.
 
+## Testing
+
+    uv run --extra dev pytest -q                                         # 150 tests
+    uv run --with pyyaml python conformance/runner/python.py --verbose   # 61 vectors
+
+`pytest` is a dev dependency, not a default one — a bare `uv run pytest` fails with
+"Failed to spawn: `pytest`" because nothing is installed to spawn; `--extra dev` is
+what pulls it in. The conformance runner takes PyYAML the same way, inline rather
+than as a dependency, for the reason given above: `asop` itself has none. See
+[`conformance/README.md`](conformance/README.md) for what a vector is, how counts
+are recomputed rather than typed by hand, and what the suite does not yet prove.
+
 ## Licence
 
 [Apache License 2.0](LICENSE). The patent grant is the point: this package is the
