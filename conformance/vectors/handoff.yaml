@@ -9,7 +9,10 @@
 # version listed is the ACTIVE one. `existing` maps a natural key already filed
 # to the inputs it was filed with. `expect` lists each decision as
 # `file <asop_id>@<version> <subject>`, `duplicate <natural key>`, or
-# `refuse <code>`. The ORDER IS NORMATIVE (§3.7): an undeclared outcome alone;
+# `refuse <code>`, followed by ` -> <targets>` when the refusal leaves targets
+# unfiled (its `toward`, which the engine records as the run's
+# `refused_toward`). A refused REQUEST shows no arrow: it blocks nothing,
+# because the declared hand-off still files without it. The ORDER IS NORMATIVE (§3.7): an undeclared outcome alone;
 # otherwise each request in the order written, then each declared hand-off in
 # declaration order, its subjects in output (or request) order.
 
@@ -81,7 +84,7 @@ vectors:
     outcome: OKAY
     outputs: *sources
     run_inputs: {root: R1}
-    expect: ["refuse handoff_refused:outcome"]
+    expect: ["refuse handoff_refused:outcome -> extract"]
     because: "a closed set is closed: an outcome the ASOP never declared files nothing and says so, instead of silently suppressing every hand-off"
 
   - id: ho-empty-fan-out-files-nothing
@@ -181,7 +184,7 @@ vectors:
     outcome: FETCHED
     outputs: {sources: {items: []}}
     run_inputs: {root: R1}
-    expect: ["refuse handoff_refused:output"]
+    expect: ["refuse handoff_refused:output -> extract"]
     because: "the output does not have the array the declaration names — a contract break between procedures, caught at the hand-off"
 
   - id: ho-refuse-ambiguous-subjects
@@ -190,7 +193,7 @@ vectors:
     outcome: FETCHED
     outputs: {sources: {sources: [{id: 1, kind: spec}, {id: "1", kind: spec}]}}
     run_inputs: {root: R1}
-    expect: ["refuse handoff_refused:output"]
+    expect: ["refuse handoff_refused:output -> extract"]
     because: "1 and \"1\" are both subject \"1\"; which item was meant is not the engine's to guess"
 
   - id: ho-where-is-type-strict
@@ -225,7 +228,7 @@ vectors:
     filer: extract
     run_inputs: {root: R1}
     existing: {"R1|consolidate|R1|a1": {root: ELSEWHERE}}
-    expect: ["refuse handoff_refused:conflict"]
+    expect: ["refuse handoff_refused:conflict -> consolidate"]
     because: "the same run already filed with different inputs; which inputs it gets must not depend on who finished first"
 
   - id: ho-replay-files-nothing

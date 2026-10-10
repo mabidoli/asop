@@ -21,18 +21,18 @@ properties:
   handoff:
     description: The id of a hand-off the filing ASOP declares.
     type: string
-    pattern: '^\S(.*\S)?$'
+    pattern: '^\S([\s\S]*\S)?$'
   to:
     description: The asop_id that hand-off targets. Must match it.
     type: string
-    pattern: '^\S(.*\S)?$'
+    pattern: '^\S([\s\S]*\S)?$'
   subject:
     description: >-
       On a `many` hand-off, one subject its `subject_from` yields. Forbidden
       on a `one` hand-off, whose subject is the chain.
     oneOf:
       - type: string
-        pattern: '^\S(.*\S)?$'
+        pattern: '^\S([\s\S]*\S)?$'
       - type: integer
   reason:
     description: Why, in the run's words. Recorded with the filing.

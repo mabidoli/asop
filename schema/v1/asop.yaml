@@ -210,7 +210,7 @@ properties:
         name:
           $ref: '#/$defs/exactName'
         description:
-          $ref: '#/$defs/exactName'
+          $ref: '#/$defs/nonBlankString'
         kind:
           # Reserved and unvalidated, exactly as on inputs (§11.5).
           true
@@ -337,7 +337,8 @@ x-asop-cross-checks:
     - {check: "at most one hand-off per target asop_id", refusal: "sop_refused"}
     - {check: "`$subject.<field>` names one key (no dots); `subject_from.array` is dot-separated keys", refusal: "sop_refused"}
     - {check: "names (ids, input keys, where keys, outcomes, outputs, artefacts) carry no surrounding whitespace", refusal: "sop_refused"}
-    - {check: "at activation: the hand-off graph reachable through hand-offs and escalations has no cycle", refusal: "sop_refused"}
+    - {check: "at activation: the graph reachable through hand-offs (escalations excluded — a person bounds them) has no cycle", refusal: "sop_refused"}
+    - {check: "at activation: no `requires` waits on an ASOP this record can transitively hand off to", refusal: "sop_refused"}
     - {check: "at filing: every hand-off decision matches handoff.yaml's rules", refusal: "handoff_refused:<rule>"}
 
 $defs:
@@ -365,7 +366,7 @@ $defs:
     # A name matched exactly: non-blank, no surrounding whitespace. Refused
     # rather than stripped — stripping is how `a` and ` a` collide.
     type: string
-    pattern: '^\S(.*\S)?$'
+    pattern: '^\S([\s\S]*\S)?$'
 
   inputMap:
     type: object

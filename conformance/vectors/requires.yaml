@@ -102,3 +102,21 @@ vectors:
     approved: [research-review]
     satisfied: true
     because: "settled, done, approved"
+
+  - id: rq-conflict-holds-the-waiter
+    asserts: [A131]
+    requires: [{kind: all_runs_done, asop_id: extract}]
+    predecessors: *preds
+    waiter: consolidate
+    runs: [[intake, R1, 1, true, true], [extract, s1, 1, true, true], [extract, s2, 1, true, true, [consolidate]]]
+    satisfied: false
+    because: "extract is settled, but a refusal TOWARD the waiting join (a conflict on its own key) means what it would be handed is in dispute"
+
+  - id: rq-reattempt-clears-the-block
+    asserts: [A131]
+    requires: [{kind: all_runs_done, asop_id: extract}]
+    predecessors: *preds
+    waiter: consolidate
+    runs: [[intake, R1, 1, true, true], [extract, s1, 1, true, true], [extract, s2, 1, true, true, [consolidate]], [extract, s2, 2, true, true]]
+    satisfied: true
+    because: "a block clears only when the refusing run is superseded by a later attempt"

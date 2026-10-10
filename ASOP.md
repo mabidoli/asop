@@ -341,9 +341,15 @@ on_escalate:
   both. `versions` is `">=N"` or `">=N,<M"`: ASCII digits, no spaces, N ≥ 1 and M > N. A
   range resolves **at filing** to the successor's ACTIVE version inside it, and the filed
   run pins that version. Outcomes still attach to versions, never to ranges (§2.1).
-- **No cycles.** An ASOP may not hand off to, escalate to, or wait on its own `asop_id`.
-  At activation, the graph reachable through hand-offs and escalations must be acyclic.
-  A loop is a nested step or a repair (§5.4); a cycle through a fan-out has no bound.
+- **No cycles, no waiting on yourself.**
+  - An ASOP may not hand off to, escalate to, or wait on its own `asop_id`.
+  - At activation, the graph reachable through **hand-offs** must be acyclic. A cycle
+    through a fan-out has no bound.
+  - Escalation edges are not part of that graph, because a person sits in every
+    escalation and that is the bound. "The decision procedure re-files the step that
+    escalated" is a normal pattern.
+  - At activation, a record may not `require` an ASOP it can transitively hand off to,
+    because those runs can exist only after it finishes.
 
 **A filing request** (`asop.filing-request/1`, [schema](schema/v1/filing-request.yaml)) is
 a finished run's own choice, written by its final step. There can be zero or more.
@@ -377,7 +383,14 @@ files.
 | `version` | no ACTIVE version of the successor is inside the declared range |
 | `conflict` | a run with this natural key was already filed with different inputs |
 
-Every refusal is recorded; none is silently dropped.
+Every refusal is recorded; none is silently dropped. Each refusal also names `toward`:
+the targets it leaves unfiled. The engine records those on the run as `refused_toward`,
+and that is what holds a join (below).
+- An undeclared outcome leaves every target unfiled.
+- A hand-off-level refusal (`output`, `version`, `inputs`, `conflict`) leaves that
+  hand-off's target unfiled.
+- A refused **request** leaves nothing unfiled, because the declared hand-off still files
+  without it.
 
 **The order of decisions is normative**, so that two engines agree line for line:
 - an undeclared outcome is a single decision on its own;
@@ -406,15 +419,25 @@ requires:
 ```
 
 Only the highest attempt per `(asop_id, subject)` counts. **X is settled** when no further
-run of X can be filed. That means every run of every ASOP that can transitively file X
-(through hand-offs or escalations, in the active library) meets three conditions:
+run of X can be filed. "Can file" is computed over **hand-offs only**, and over the
+active versions **and every version a run in the chain pins**, because a run pinned to
+an older version hands off by that version's declarations. Escalation edges are left out:
+an escalated run is not done, so anything downstream of it is already held. Counting the
+escalation would make a join wait on the very procedure it may escalate from. X is
+settled when every run of every ASOP that can transitively file X meets three
+conditions:
 - it is done;
 - it has been **processed**: its completion was evaluated and its hand-off decisions
   recorded, including when nothing fired;
 - it has no refused hand-off toward X or toward one of those ASOPs.
 
-A refusal is a blocker that needs a person, never an empty result. An ancestor that never
-ran, because an earlier outcome closed its branch, has no runs and blocks nothing.
+A refusal is a blocker that needs a person, never an empty result. **A refusal toward
+the waiting procedure itself** holds it whatever its predicates say. A `conflict` on its
+own natural key is the typical case: what it would be handed is in dispute. A block
+clears only when the refusing run is superseded by a later attempt, whose hand-offs are
+evaluated afresh. The person's fix is to repair what was refused and re-run, never to
+mark the refusal resolved. An ancestor that never ran, because an earlier outcome closed
+its branch, has no runs and blocks nothing.
 
 - **`run_done(X)`**: X is settled, at least one run of X exists, and every run of X is
   done.
@@ -451,7 +474,7 @@ flow:
 - **Retries.** §5.4 already fixes the policy: one repair, then a person. It is not
   declared per ASOP.
 - **Recording.** Every hand-off decision is ledgered with its parent run: filed,
-  duplicate or refused. That includes the targets a refused hand-off would have filed,
+  duplicate or refused. Each refusal's `toward` goes into the run's `refused_toward`,
   which is what keeps a join from reading a refusal as an empty result.
 - **Re-evaluating `requires`** whenever the chain's state changes.
 
@@ -1104,7 +1127,7 @@ stack trace. Codes relevant to ASOPs, from `asop.refusals`, plus the ones v3 add
 | **promotion** | drafting an ASOP from a run tree that worked |
 | **hand-off** | a declared, outcome-conditioned filing of another ASOP when a run finishes (§3.7) |
 | **chain** | the runs one starting run leads to through hand-offs; the scope of `requires` and of the natural key |
-| **filing request** | a finished run's own narrowing or supplementing of a declared hand-off |
+| **filing request** | a finished run's own choice of which declared hand-offs and subjects to file; it carries no inputs |
 | **plane** | a coordination layer storing ASOPs and outcomes across harnesses |
 | **harness** | a runtime that executes beads; runs alone or reports to a plane |
 

@@ -305,7 +305,7 @@ def test_a_target_that_does_not_declare_the_input_is_refused():
     bad = v(body("x", handoffs=[{"id": "h", "to": {"asop_id": "build", "version": 1},
                                  "inputs": {"task_id": "t", "colour": "blue"}}]))
     with pytest.raises(ChainContractError, match="does not declare"):
-        validate_handoff_targets(bad, resolve)
+        validate_handoff_targets(bad, resolve, asop_id="x")
 
 
 def test_a_target_left_with_an_unmapped_input_is_refused():
@@ -313,19 +313,19 @@ def test_a_target_left_with_an_unmapped_input_is_refused():
     # inputs), so the filing would always be refused — say so at activation
     bad = v(body("x", handoffs=[{"id": "h", "to": {"asop_id": "build", "version": 1}}]))
     with pytest.raises(ChainContractError, match="unmapped"):
-        validate_handoff_targets(bad, resolve)
+        validate_handoff_targets(bad, resolve, asop_id="x")
 
 
 def test_an_unresolvable_target_is_refused():
     bad = v(body("x", handoffs=[{"id": "h", "to": {"asop_id": "nowhere", "version": 1}}]))
     with pytest.raises(ChainContractError, match="no ACTIVE version"):
-        validate_handoff_targets(bad, resolve)
+        validate_handoff_targets(bad, resolve, asop_id="x")
 
 
 def test_an_escalation_must_reach_a_person():
     bad = v(body("x", on_escalate={"to": {"asop_id": "build", "version": 1}, "inputs": {}}))
     with pytest.raises(ChainContractError, match="reaches a person"):
-        validate_handoff_targets(bad, resolve)
+        validate_handoff_targets(bad, resolve, asop_id="x")
 
 
 def test_a_cycle_through_other_records_is_refused():
@@ -341,12 +341,73 @@ def test_a_cycle_through_other_records_is_refused():
         LIBRARY.clear(); LIBRARY.update(saved)
 
 
-def test_predecessors_come_from_handoffs_and_escalations():
+def test_predecessors_come_from_handoffs_only():
+    # review N1: counting escalation edges made a join an ancestor of what it waits on
     preds = predecessors_of({k: v(b, k) for k, vs in LIBRARY.items() for b in vs.values()})
     assert preds["extract"] == {"intake"}
     assert preds["consolidate"] == {"extract"}
-    assert preds["decide"] == {"intake", "extract"}
-    assert "intake" not in preds
+    assert "decide" not in preds and "intake" not in preds
+
+
+def test_predecessors_take_every_pinned_version():
+    # review P6: a run pinned to an older version hands off by that version's declarations
+    old = v(body("Old extract", inputs=["root"], handoffs=[
+        {"id": "j", "to": {"asop_id": "legacy-join", "version": 1}, "inputs": {"root": "$run.inputs.root"}}]))
+    preds = predecessors_of([("extract", v(EXTRACT, "extract")), ("extract", old)])
+    assert preds["consolidate"] == {"extract"} and preds["legacy-join"] == {"extract"}
+
+
+def with_library(extra):
+    saved = dict(LIBRARY)
+    LIBRARY.update({k: {1: b} for k, b in extra.items()})
+    return saved
+
+
+def test_a_requires_on_something_this_asop_files_is_refused():
+    # review N1, simple form: W hands off to X and waits for X — it can never start
+    saved = with_library({"x": BUILD})
+    try:
+        w = v(body("W", handoffs=[{"id": "h", "to": {"asop_id": "x", "version": 1}, "inputs": {"task_id": "t"}}],
+                   requires=[{"kind": "run_done", "asop_id": "x"}]), "w")
+        with pytest.raises(ChainContractError, match="wait forever"):
+            validate_handoff_targets(w, resolve, asop_id="w")
+    finally:
+        LIBRARY.clear(); LIBRARY.update(saved)
+
+
+def test_a_requires_on_a_transitive_descendant_is_refused():
+    saved = with_library({"mid": body("Mid", inputs=["root"], handoffs=[
+        {"id": "h", "to": {"asop_id": "build", "version": 1}, "inputs": {"task_id": "$run.inputs.root"}}])})
+    try:
+        w = v(body("W", handoffs=[{"id": "h", "to": {"asop_id": "mid", "version": 1}, "inputs": {"root": "r"}}],
+                   requires=[{"kind": "all_runs_done", "asop_id": "build"}]), "w")
+        with pytest.raises(ChainContractError, match="wait forever"):
+            validate_handoff_targets(w, resolve, asop_id="w")
+    finally:
+        LIBRARY.clear(); LIBRARY.update(saved)
+
+
+def test_an_escalation_loop_with_a_person_in_it_is_allowed():
+    # review N3: decide -> apply, apply escalates to decide, is bounded by the person
+    saved = with_library({
+        "decide2": body("Decide", inputs=["question"], roles={"owner": {"kind": "human"}},
+                        steps=[{"name": "answer", "role": "owner", "purpose": "answer", "gate": HUMAN}],
+                        handoffs=[{"id": "apply", "to": {"asop_id": "apply", "version": 1}, "inputs": {}}]),
+        "apply": body("Apply", on_escalate={"to": {"asop_id": "decide2", "version": 1}, "inputs": {}}),
+    })
+    try:
+        for k in ("decide2", "apply"):
+            validate_handoff_targets(v(LIBRARY[k][1], k), resolve, asop_id=k)
+    finally:
+        LIBRARY.clear(); LIBRARY.update(saved)
+
+
+def test_cycle_detection_needs_the_records_own_id():
+    # review N3: without it, A->B->A passed while A was not yet active
+    with pytest.raises(ChainContractError):
+        validate_handoff_targets(v(BUILD), resolve, asop_id="")
+    with pytest.raises(TypeError):
+        validate_handoff_targets(v(BUILD), resolve)  # keyword is required
 
 
 # ------------------------------------------------------------------ filing
@@ -623,3 +684,36 @@ def test_every_predicate_must_hold():
     assert not ok(reqs, *done)
     assert not ok(reqs, approved=["research-review"])
     assert ok(reqs, *done, approved=["research-review"])
+
+
+def test_a_conflict_on_the_waiters_own_key_holds_it():
+    # review N2: the join started with the first finisher's inputs
+    rs = [run("intake", "R1"), run("extract", "s1"), run("extract", "s2", refused_toward=["consolidate"])]
+    assert ok(JOIN, *rs)  # extract itself is settled ...
+    assert not requires_satisfied(JOIN, runs=rs, predecessors=PREDS, waiter="consolidate")  # ... but the join is held
+    rs[2] = run("extract", "s2", 2)  # the refusing run re-attempted cleanly
+    assert requires_satisfied(JOIN, runs=rs, predecessors=PREDS, waiter="consolidate")
+
+
+def test_every_refusal_says_what_it_leaves_unfiled():
+    # review N4/P7: the engine fills refused_toward from `toward`; an undeclared
+    # outcome blocks every target, a refused request blocks nothing
+    d = plan_intake(outcome="OKAY")
+    assert d[0]["toward"] == ["extract"]
+    d = plan_intake(requests=[req(subject="nope")])
+    assert [x["toward"] for x in d if x["action"] == "refuse"] == [[]]
+    d = plan_intake(outputs={"sources": {"items": []}})
+    assert d[0]["toward"] == ["extract"]
+    d = plan_extract(existing={"R1|consolidate|R1|a1": {"root": "ELSEWHERE"}})
+    assert d[0]["toward"] == ["consolidate"]
+
+
+def test_a_blank_escalation_subject_is_refused_not_raised():
+    d = plan_escalation(v(INTAKE, "intake"), subject=" ", run_inputs={"root": "R1"}, context={"question": "q"},
+                        resolve=resolve, chain="R1")
+    assert d["code"] == "handoff_refused:malformed" and d["toward"] == ["decide"]
+
+
+def test_an_output_description_is_text_not_a_name():
+    # review M8: the schema used exactName for descriptions; they are prose, trimmed like every description
+    assert v(body("x", outputs=[{"name": "o", "description": " d "}]))["outputs"][0]["description"] == "d"

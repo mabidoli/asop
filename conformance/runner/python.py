@@ -58,7 +58,7 @@ def _handoff_decisions(vector: dict, library: dict) -> list[str]:
             if code not in REFUSAL_CODES:
                 out.append(f"uncatalogued {d['code']}")
             else:
-                out.append(f"refuse {d['code']}")
+                out.append(f"refuse {d['code']}" + (f" -> {','.join(d['toward'])}" if d.get("toward") else ""))
     return out
 
 
@@ -79,7 +79,7 @@ def run_one(artifact: str, vector: dict, suite: dict | None = None) -> tuple[boo
             runs = [{"asop_id": r[0], "subject": r[1], "attempt": r[2], "done": r[3], "processed": r[4],
                      "refused_toward": r[5] if len(r) > 5 else []} for r in vector.get("runs") or []]
             got = requires_satisfied(vector["requires"], runs=runs, predecessors=vector.get("predecessors") or {},
-                                     approved=vector.get("approved") or [])
+                                     approved=vector.get("approved") or [], waiter=vector.get("waiter"))
             if got != vector["satisfied"]:
                 return False, f"expected satisfied={vector['satisfied']}, got {got}"
             return True, f"satisfied={got}"

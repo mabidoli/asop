@@ -699,7 +699,7 @@
   testable: true
   violation: "A negative verdict or nonzero exit status releases dependents."
 #
-# NEW RULES, 2026-10-10 — hand-offs (§3.7, v3.5). Extracted as A110-A130 from
+# NEW RULES, 2026-10-10 — hand-offs (§3.7, v3.5). Extracted as A110-A132 from
 # the section that reverses §11.4: what a finished run may file next is
 # declared on the ASOP, and an engine refuses anything not declared. The
 # vocabulary for `applies_to` gains `handoff` (a filing decision) and
@@ -832,3 +832,16 @@
   applies_to: asop
   testable: true
   violation: "A→B→A activates, or a target is left an input no filing can supply."
+- id: A131
+  section: "3.7"
+  rule: "A refusal toward the waiting procedure itself holds it whatever its predicates say; a block clears only when the refusing run is superseded by a later attempt."
+  applies_to: requires
+  testable: true
+  violation: "A join starts while its own inputs are in conflict, or a block is cleared by marking it resolved."
+- id: A132
+  section: "3.7"
+  rule: "Escalation edges are excluded from cycle detection and from the predecessor graph; at activation a record may not `require` an ASOP it can transitively hand off to."
+  applies_to: asop
+  testable: true
+  violation: "A decision procedure that re-files the step that escalated is refused as a cycle, or a join deadlocks on its own run."
+

@@ -52,13 +52,23 @@ subject, output, inputs, version and conflict. The verb table gains
   not declare files nothing, and that is refused rather than silent.
 - **A join waits until its predecessors are settled.** X is settled when every run that
   could still file X is done and its hand-offs are recorded, with no refusal on the path.
-  An empty fan-out satisfies its join, and a refused one blocks it for a person.
+  - "Could still file" is computed over hand-offs only (escalations excluded), and over
+    every version the chain's runs pin.
+  - An empty fan-out satisfies its join, and a refused one blocks it for a person.
+  - A refusal toward the waiting procedure itself, such as a `conflict`, holds it.
+  - A block clears only when the refusing run is superseded by a later attempt.
+  - Every refusal names the targets it leaves unfiled (`toward`); a refused request
+    leaves none.
 - **Filing is idempotent on a percent-encoded natural key.** A re-filing carries the next
   attempt. The same key with different inputs is a `conflict`.
 - **Comparisons are type-strict.** Subject ids are strings or integers and must be unique;
   values handed on are scalars; names are exact (refused, never stripped); version
-  ranges are `>=N[,<M]` in ASCII digits with no spaces. Activation refuses cycles across
-  records and any target input left unmapped.
+  ranges are `>=N[,<M]` in ASCII digits with no spaces.
+- **Activation refuses:**
+  - hand-off cycles across records (a loop through an escalation is allowed, because a
+    person bounds it);
+  - any target input left unmapped;
+  - a `requires` on anything the record itself can transitively file.
 
 **Corrected from the proposal that motivated it, each for a stated reason:**
 
@@ -83,10 +93,10 @@ subject, output, inputs, version and conflict. The verb table gains
 - **Targets use `asop_id`, not `asop`,** as every other pin does. There is one hand-off
   per target.
 
-**Hardened before release by an adversarial review.** A first cut of this release was
-reviewed before anything was published. The review confirmed 13 defects, and each now has
-a test that fails when the defect is reintroduced; 18 deliberate mutants were run and
-every one was caught. The defects:
+**Hardened before release by two rounds of adversarial review.** A first cut of this
+release was reviewed before anything was published. The first round confirmed 13 defects,
+and each now has a test that fails when the defect is reintroduced; 18 deliberate mutants
+were run and every one was caught. The defects:
 
 - one refused request could cancel a declared fan-out;
 - an undeclared outcome silently suppressed every hand-off;
@@ -101,6 +111,17 @@ every one was caught. The defects:
 - the decision order was normative but unstated;
 - path semantics were unstated;
 - a cycle across records passed.
+
+The second round, a verification of those fixes, found that the new join rule had its own
+holes:
+- a join could deadlock on its own run through an escalation edge, or by requiring
+  something it files;
+- a `conflict` did not hold the join it was about;
+- an undeclared-outcome refusal named no targets, so a join downstream could start early;
+- cycle detection was blind without the record's own id, and refused a normal
+  escalation loop.
+
+All of them are fixed, and 6 more mutants were caught.
 
 **Compatibility.** Additive for records: every v3.4 record is a valid v3.5 record. It is
 not additive for readers. The schema is closed, so a v3.4 reader refuses a record with
@@ -118,9 +139,9 @@ procedure into a dead end. Adopt 0.5.0 before accepting chained records.
   self-reference.
 - Conformance:
   - three new vector files, `chain-record.yaml` (asop), `handoff.yaml` and
-    `requires.yaml`, with 51 vectors, for 112 in all;
-  - 21 new assertions, A110–A130, of which 20 are cited by a vector. A130 needs a
-    resolver, so the Python tests cover it;
+    `requires.yaml`, with 53 vectors, for 114 in all;
+  - 23 new assertions, A110–A132, of which 21 are cited by a vector. A130 and A132 need
+    a resolver, so the Python tests cover them;
   - the reference runner learns three artifact kinds.
 - Found while cross-checking, and predating this release: `validate_gate`'s normalised
   output (nulls, `schema_version`) does not validate against the stored step and gate
