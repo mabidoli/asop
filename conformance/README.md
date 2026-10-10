@@ -16,19 +16,19 @@ A document and the outcome a conforming implementation must reach. Nothing else.
   because: "a human gate nobody is named on is a gate nobody answers"
 ```
 
-`asserts` cites [`assertions.yaml`](assertions.yaml) — the 109 normative rules
+`asserts` cites [`assertions.yaml`](assertions.yaml) — the 126 normative rules
 extracted from the specification — so a rule with no vector is visibly untested
 rather than quietly untested.
 
 > **These counts are facts about the files, and they went stale once.** They read
-> 107/8/39 while the files said 109/10/61, which is worse than having no numbers:
+> 107/8/39 while the files said 109/10/61 (now 126/27/97, v3.5), which is worse than having no numbers:
 > a reader cross-checking a coverage claim against this README would have found a
 > mismatch and concluded the claim was wrong. Recount before trusting:
 >
 > ```
 > grep -c '^- id:' assertions.yaml                  # assertions
 > grep -rho 'A[0-9]\{3\}' vectors/ | sort -u | wc -l  # cited by a vector
-> grep -rc '^\s*-\s*id:' vectors/*.yaml             # vectors
+> grep -c '^  - id:' vectors/*.yaml                # vectors (top-level only; documents nest ids too)
 > ```
 
 ## Claiming conformance
@@ -49,6 +49,9 @@ Exit 0 when every vector matches, 1 otherwise, so CI can gate on it.
 | `vectors/gate.yaml` | is this gate well formed? |
 | `vectors/attestation.yaml` | is this evidence admissible for that gate? |
 | `vectors/satisfaction.yaml` | given that evidence, **may the step be recorded as done?** |
+| `vectors/chain-record.yaml` *(v3.5)* | is this record's chaining well formed? |
+| `vectors/handoff.yaml` *(v3.5)* | given a finished run, **what is filed next, and what is refused?** |
+| `vectors/requires.yaml` *(v3.5)* | **may a filed run start?** |
 
 The third exists because the first two cannot answer it. A failing attestation is
 a *valid document* — refusing it would leave failure unrecordable — so an
@@ -61,23 +64,24 @@ already existed and was already green.
 
 Stated here because a suite that hides its own coverage is worse than a small one.
 
-- **No vectors for ASOP records, steps, or the revision policy.** Roughly a third
-  of the standard's surface. The record shape, role bindings, separation-of-duties
+- **No vectors for ASOP records, steps, or the revision policy — except chaining.**
+  `chain-record.yaml` (v3.5) covers the five chaining fields of a record and nothing
+  else about it. Roughly a third of the standard's surface is still uncovered. The record shape, role bindings, separation-of-duties
   constraints, the human ratchet and protected tags are all unchecked.
 - **Normalised output is not compared.** How an implementation shapes what it
   returns — nulls for absent fields, a stamped schema version — is storage
   convention rather than contract, and pinning it would make the suite a stricter
   opinion than the standard. The cost is that two conforming implementations may
   return different shapes for the same input.
-- **A pattern-matcher could still pass.** With 61 vectors, an implementation that
+- **A pattern-matcher could still pass.** With 97 vectors, an implementation that
   recognises these specific documents rather than implementing the rules would
   score full marks. Commands are varied across vectors to make that less
   comfortable, but the real answer is more vectors, and the honest statement is
   that passing proves the rules exercised here and nothing beyond them.
 - **Only refusal codes are compared, not messages.** Two implementations may
   refuse the same document for different stated reasons.
-- **10 of the 109 assertions are cited by a vector.** The other 99 are all
-  `testable: true`. 88 of them need artifact types the runner does not have yet —
+- **27 of the 126 assertions are cited by a vector** (10 before v3.5; the 17 hand-off
+  assertions A110–A126 are all cited). The other 99 are all `testable: true`. 88 of them need artifact types the runner does not have yet —
   an `asop` record, a `step`, a `revision` changeset — so the honest number for
   what is coverable today is smaller than the gap looks.
 - **21 refusal sites in the reference implementation are unreachable by any
@@ -155,3 +159,35 @@ does not depend on, deliberately: the package is stdlib-only and an adopter impo
 
 Vectors are data. An implementation in any language becomes conforming by reading them
 and comparing outcomes; nothing here obliges anyone to run this particular runner.
+
+## v3.5 — hand-offs (§3.7)
+
+Three files, because chaining asks three different questions and an implementation can
+answer one right and another wrong:
+
+- `chain-record.yaml` — record-level: declared outcomes, declared outputs, the reference
+  grammar, the target grammar, the closed `requires` list, no self-reference. Refusals
+  are `sop_refused`, like every record error.
+- `handoff.yaml` — the filing decision. The suite carries a shared `library`, so every
+  input to the decision is in the file; the expected decisions are listed line by line,
+  in order, and two engines must agree on each. Refusal codes are checked against
+  `asop.refusals` as `handoff_refused:<rule>`.
+- `requires.yaml` — the start decision, including the empty fan-out that must satisfy
+  its join (the deadlock case).
+
+Each was checked by breaking the reference implementation on purpose: removing a
+`where_not` filter, letting a join ignore its fan-out, allowing a request to override a
+mapping, disabling de-duplication and accepting any range grammar each turned at least
+one vector red.
+
+Not yet covered:
+
+- **cross-record checks at activation** (a target that does not declare an input it is
+  handed, an escalation target with no human step): covered by the Python tests, not by
+  a vector, because the vector format has no resolver for `validate_handoff_targets`.
+  `handoff.yaml`'s library covers the same checks at filing.
+- **staleness and re-filing**: engine duties, not document properties.
+- **the schema/normaliser gap**: `validate_gate`'s normalised output carries nulls and
+  `schema_version`, which the stored `step.yaml`/`gate.yaml` schema refuses. Found while
+  cross-checking these vectors against the schema; it predates v3.5 and is listed here
+  so nobody re-discovers it.

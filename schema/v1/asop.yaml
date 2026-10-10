@@ -181,6 +181,93 @@ properties:
       `uses`) is bounded at 3 where the run tree is filed, because it is the
       tree that nests, not the record.
 
+  # ---- chaining (§3.7, v3.5) ------------------------------------------------
+  # All five are optional. A record without them is standalone, exactly as in
+  # v3.4. A record WITH them is refused by a v3.4 reader — this schema is closed
+  # (additionalProperties: false) and that is deliberate: a reader that dropped
+  # the hand-offs it did not understand would run the procedure as a dead end.
+
+  outcomes:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      $ref: '#/$defs/nonBlankString'
+    description: >-
+      The closed set of outcomes a run of this procedure can finish with.
+      Declared so that a hand-off's `on_outcomes` is checked where it is
+      written: a misspelt outcome is refused at authoring, instead of being a
+      hand-off that silently never fires.
+
+  outputs:
+    type: array
+    uniqueItems: true
+    items:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          $ref: '#/$defs/nonBlankString'
+        description:
+          $ref: '#/$defs/nonBlankString'
+        kind:
+          # Reserved and unvalidated, exactly as on inputs (§11.5).
+          true
+    description: >-
+      What a run writes that a hand-off may read, by name. The mirror of
+      `inputs`: what one procedure promises to write is what the next one is
+      allowed to read, which is the inter-procedure contract that otherwise
+      lives only in prose.
+
+  handoffs:
+    type: array
+    minItems: 1
+    items:
+      $ref: '#/$defs/handoff'
+    description: >-
+      Where a finished run MAY file next. Declared on the predecessor; fired
+      by the engine when the run completes with an outcome in `on_outcomes`;
+      refused (`handoff_refused:<rule>`) when a run asks for anything else.
+
+  on_escalate:
+    type: object
+    additionalProperties: false
+    required: [to]
+    properties:
+      to:
+        $ref: '#/$defs/target'
+      inputs:
+        $ref: '#/$defs/inputMap'
+    description: >-
+      The procedure an escalation files (§5.4's second failure). Its target
+      must contain a step a human role does, and its inputs read only the
+      run's inputs and literals — an escalation happens before the run has
+      finished writing its outputs.
+
+  requires:
+    type: array
+    minItems: 1
+    items:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [kind, asop_id]
+          properties:
+            kind: {enum: [run_done, all_runs_done]}
+            asop_id: {$ref: '#/$defs/nonBlankString'}
+        - type: object
+          additionalProperties: false
+          required: [kind, artefact]
+          properties:
+            kind: {const: human_approved}
+            artefact: {$ref: '#/$defs/nonBlankString'}
+    description: >-
+      When a filed run may START. Declared on the successor — the only
+      procedure that sees every predecessor — and evaluated within one chain.
+      The kinds are a closed list; concurrency, staleness and duplicate
+      suppression are engine duties, not predicates (§3.7).
+
   author:
     description: Who wrote this version.
     $ref: '#/$defs/nonBlankString'
@@ -235,8 +322,89 @@ x-asop-cross-checks:
     - {check: "at filing: every declared input is supplied", refusal: "inputs_missing"}
     - {check: "at filing: every role resolves to a binding satisfying every constraint", refusal: "role_unbound | constraint_unsatisfiable"}
     - {check: "the filed run tree nests at most 3 deep (width is bounded by the step count)", refusal: "decomposition_bound"}
+    - {check: "a hand-off's `on_outcomes` names only declared `outcomes`", refusal: "sop_refused"}
+    - {check: "a `many` hand-off has `subject_from`, whose `output` is a declared output; a `one` hand-off has none", refusal: "sop_refused"}
+    - {check: "input references are `$subject[.<field>]` (on `many` only), `$run.inputs.<declared>`, `$run.outputs.<declared>`; `$$` is a literal `$`", refusal: "sop_refused"}
+    - {check: "a target carries exactly one of `version` and `versions`; `versions` is '>=N' or '>=N,<M'", refusal: "sop_refused"}
+    - {check: "no hand-off, escalation or `requires` names the record's own asop_id", refusal: "sop_refused"}
+    - {check: "an `on_escalate` reads no `$run.outputs`", refusal: "sop_refused"}
+    - {check: "at activation: every hand-off target resolves, declares every input it is handed, and is handed every input it declares", refusal: "sop_refused"}
+    - {check: "at activation: an `on_escalate` target has a step whose role is human", refusal: "sop_refused"}
+    - {check: "at filing: every hand-off decision matches handoff.yaml's rules", refusal: "handoff_refused:<rule>"}
 
 $defs:
+  target:
+    type: object
+    additionalProperties: false
+    required: [asop_id]
+    properties:
+      asop_id: {$ref: '#/$defs/nonBlankString'}
+      version: {type: integer, minimum: 1}
+      versions:
+        type: string
+        pattern: '^\s*>=\s*[0-9]+\s*(,\s*<\s*[0-9]+\s*)?$'
+    oneOf:
+      - required: [version]
+      - required: [versions]
+    description: >-
+      A pin, or a range resolved at filing to the ACTIVE version inside it.
+      Either way the filed run pins one version — outcomes still attach to a
+      version, never to a range.
+
+  inputMap:
+    type: object
+    propertyNames: {$ref: '#/$defs/nonBlankString'}
+    additionalProperties:
+      type: [string, number, boolean]
+    description: >-
+      Successor input name -> a reference (`$subject`, `$subject.<field>`,
+      `$run.inputs.<name>`, `$run.outputs.<name>`) or a scalar literal. A
+      literal beginning with `$` is written `$$`.
+
+  handoff:
+    type: object
+    additionalProperties: false
+    required: [id, to]
+    properties:
+      id:
+        type: string
+        pattern: '^[A-Za-z0-9][A-Za-z0-9._-]*$'
+      to: {$ref: '#/$defs/target'}
+      on_outcomes:
+        type: array
+        minItems: 1
+        items: {$ref: '#/$defs/nonBlankString'}
+      cardinality:
+        enum: [one, many]
+        default: one
+      subject_from:
+        type: object
+        additionalProperties: false
+        required: [output, array, id_field]
+        properties:
+          output: {$ref: '#/$defs/nonBlankString'}
+          array: {$ref: '#/$defs/nonBlankString'}
+          id_field: {$ref: '#/$defs/nonBlankString'}
+          where:
+            type: object
+            minProperties: 1
+            additionalProperties:
+              anyOf:
+                - type: [string, number, boolean]
+                - {type: array, minItems: 1, items: {type: [string, number, boolean]}}
+          where_not:
+            type: object
+            minProperties: 1
+            additionalProperties: {type: [string, number, boolean]}
+      inputs: {$ref: '#/$defs/inputMap'}
+    if:
+      properties: {cardinality: {const: many}}
+      required: [cardinality]
+    then:
+      required: [subject_from]
+    else:
+      not: {required: [subject_from]}
+
   # See gate.yaml: presence means valued, and blank is not a value.
   nonBlankString:
     type: string

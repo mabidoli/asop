@@ -479,6 +479,14 @@ class ASOP:
     constraints: list[dict] = field(default_factory=list)
     steps: list[Step] = field(default_factory=list)
 
+    # Chaining (ASOP.md §3.7, v3.5). All optional; an ASOP without them is
+    # standalone, exactly as before. Validated by `asop.chain`.
+    outcomes: list[str] = field(default_factory=list)
+    outputs: list[dict] = field(default_factory=list)
+    handoffs: list[dict] = field(default_factory=list)
+    on_escalate: Optional[dict] = None
+    requires: list[dict] = field(default_factory=list)
+
     author: Optional[str] = None
     author_kind: Optional[str] = None
     proposals: list[str] = field(default_factory=list)
@@ -523,8 +531,8 @@ def validate_step(payload: dict, *, index: int) -> dict:
     if "next_sop" in payload:
         raise SopContractError(
             f"step {index}: 'next_sop' is not a v3 field. Composition inside a "
-            f"procedure is nesting (`uses`); sequencing between procedures is "
-            f"the harness's decision (ASOP.md §11.4)."
+            f"procedure is nesting (`uses`); what a procedure may file after it "
+            f"finishes is declared once, on the ASOP, as `handoffs` (ASOP.md §3.7)."
         )
     allowed = (
         set(STEP_TEXT_FIELDS)
@@ -625,12 +633,20 @@ def validate_step(payload: dict, *, index: int) -> dict:
     return out
 
 
-def validate_asop(payload: dict) -> dict:
+def validate_asop(payload: dict, *, asop_id: Optional[str] = None) -> dict:
     """Normalise and check a whole ASOP body: record fields, roles,
-    constraints, and every step against the roles. Raises rather than
-    repairing. The identity fields (`asop_id`, `version`, `status`, author,
-    timestamps) belong to the store and are not part of the body."""
-    allowed = set(ASOP_TEXT_FIELDS) | {"title", "task_type", "inputs", "roles", "constraints", "steps", "proposals"}
+    constraints, chaining, and every step against the roles. Raises rather
+    than repairing. The identity fields (`asop_id`, `version`, `status`,
+    author, timestamps) belong to the store and are not part of the body;
+    a store passes `asop_id` so a hand-off to the record itself is refused.
+
+    Chaining is checked against THIS record only. Whether the targets accept
+    what they are handed needs the other records — `asop.chain.validate_handoff_targets`."""
+    from asop.chain import CHAIN_FIELDS, ChainContractError, validate_chain_fields
+
+    allowed = (set(ASOP_TEXT_FIELDS)
+               | {"title", "task_type", "inputs", "roles", "constraints", "steps", "proposals"}
+               | set(CHAIN_FIELDS))
     unknown = set(payload) - allowed
     if unknown:
         raise SopContractError(
@@ -668,6 +684,12 @@ def validate_asop(payload: dict) -> dict:
             rec_out["kind"] = rec["kind"]      # reserved, unvalidated in v3
         cleaned_inputs.append(rec_out)
     out["inputs"] = cleaned_inputs
+
+    # chaining: outcomes, outputs, handoffs, on_escalate, requires (§3.7)
+    try:
+        out.update(validate_chain_fields(payload, asop_id=asop_id, input_names=seen))
+    except ChainContractError as e:
+        raise SopContractError(str(e)) from e
 
     # roles: {name: {kind}}
     roles = payload.get("roles") or {}

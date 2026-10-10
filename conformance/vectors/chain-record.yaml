@@ -1,0 +1,164 @@
+# Conformance vectors — is this ASOP's CHAINING well formed? (§3.7, v3.5)
+#
+# Record-level checks only: everything here is decidable from the one record.
+# Whether a target accepts what it is handed needs the other records and is
+# answered at activation and again at filing (handoff.yaml).
+#
+# Each `document` is an ASOP body; `asop_id` is the id the store would give it.
+# A refusal here is `sop_refused`, like every other record error (§10).
+
+artifact: asop
+x-base: &base
+  title: A procedure
+  inputs: [{name: root}]
+  roles: {worker: {kind: agent}}
+  steps: [{name: do, role: worker, purpose: do it, gate: {kind: deterministic, check: make check}}]
+
+vectors:
+  - id: cr-accept-standalone
+    asserts: [A110]
+    document: *base
+    expect: accept
+    because: "a v3.4 record is a valid v3.5 record"
+
+  - id: cr-accept-full-chain
+    asserts: [A111, A112, A113, A114, A115]
+    asop_id: intake
+    document:
+      <<: *base
+      outcomes: [FETCHED, BLOCKED]
+      outputs: [{name: sources}]
+      handoffs:
+        - id: each
+          to: {asop_id: extract, versions: ">=2,<4"}
+          on_outcomes: [FETCHED]
+          cardinality: many
+          subject_from: {output: sources, array: sources, id_field: id, where: {kind: [spec]}}
+          inputs: {source_id: $subject, root: $run.inputs.root, note: "$$literal"}
+      on_escalate: {to: {asop_id: decide, version: 1}, inputs: {question_kind: escalation, root: $run.inputs.root}}
+      requires: [{kind: human_approved, artefact: brief}]
+    expect: accept
+    because: "every chaining field, used as declared"
+
+  - id: cr-refuse-undeclared-outcome
+    asserts: [A111]
+    document:
+      <<: *base
+      outcomes: [FETCHED]
+      handoffs: [{id: h, to: {asop_id: next, version: 1}, on_outcomes: [FETCHD]}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "not a declared outcome"
+    because: "the misspelling that would otherwise never fire, silently"
+
+  - id: cr-refuse-outcomes-not-declared
+    asserts: [A111]
+    document:
+      <<: *base
+      handoffs: [{id: h, to: {asop_id: next, version: 1}, on_outcomes: [DONE]}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "declares no 'outcomes'"
+    because: "an outcome vocabulary is declared before it is used"
+
+  - id: cr-refuse-many-without-subject-from
+    asserts: [A112]
+    document:
+      <<: *base
+      handoffs: [{id: h, to: {asop_id: next, version: 1}, cardinality: many}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "no 'subject_from'"
+    because: "a fan-out over nothing"
+
+  - id: cr-refuse-subject-from-undeclared-output
+    asserts: [A112]
+    document:
+      <<: *base
+      handoffs: [{id: h, to: {asop_id: next, version: 1}, cardinality: many, subject_from: {output: tasks, array: tasks, id_field: id}}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "not a declared output"
+    because: "a procedure fans out only over what it promises to write — the inter-procedure contract made checkable"
+
+  - id: cr-refuse-subject-on-one
+    asserts: [A113]
+    document:
+      <<: *base
+      handoffs: [{id: h, to: {asop_id: next, version: 1}, inputs: {x: $subject}}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "only on a `many`"
+    because: "a `one` hand-off has no subject to read"
+
+  - id: cr-refuse-undeclared-input-reference
+    asserts: [A113]
+    document:
+      <<: *base
+      handoffs: [{id: h, to: {asop_id: next, version: 1}, inputs: {x: $run.inputs.rot}}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "does not declare"
+    because: "a typo in a reference is refused where it is written"
+
+  - id: cr-refuse-range-grammar
+    asserts: [A114]
+    document:
+      <<: *base
+      handoffs: [{id: h, to: {asop_id: next, versions: "^2"}}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "only two forms"
+    because: "a range two engines parse differently is a fork"
+
+  - id: cr-refuse-pin-and-range
+    asserts: [A114]
+    document:
+      <<: *base
+      handoffs: [{id: h, to: {asop_id: next, version: 2, versions: ">=2"}}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "exactly one of"
+    because: "which one wins is exactly the question no record should leave open"
+
+  - id: cr-refuse-engine-predicate
+    asserts: [A115]
+    document:
+      <<: *base
+      requires: [{kind: slot_free}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "engine configuration"
+    because: "concurrency is the same for every flow; it is not procedure data"
+
+  - id: cr-refuse-invented-predicate
+    asserts: [A115]
+    document:
+      <<: *base
+      requires: [{kind: when_ready, asop_id: x}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "closed"
+    because: "the list grows by spec version, never by author"
+
+  - id: cr-refuse-self-handoff
+    asserts: [A116]
+    asop_id: loop
+    document:
+      <<: *base
+      handoffs: [{id: again, to: {asop_id: loop, version: 1}, inputs: {root: $run.inputs.root}}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "its own ASOP"
+    because: "a procedure that files itself has no bound"
+
+  - id: cr-refuse-escalation-reads-outputs
+    asserts: [A126]
+    document:
+      <<: *base
+      outputs: [{name: o}]
+      on_escalate: {to: {asop_id: decide, version: 1}, inputs: {q: $run.outputs.o}}
+    expect: refuse
+    refusal: sop_refused
+    reaches: "never its outputs"
+    because: "an escalation happens before the run has finished writing"

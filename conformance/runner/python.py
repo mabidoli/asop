@@ -24,16 +24,70 @@ from asop.errors import Refusal
 from asop.gates import gate_satisfied, validate_attestation, validate_gate
 from asop.refusals import CODES as REFUSAL_CODES
 from asop.revision import may_flip
+from asop.chain import plan_handoffs, requires_satisfied, version_in
+from asop.sop import SopContractError, validate_asop
 
 VECTORS = pathlib.Path(__file__).resolve().parents[1] / "vectors"
 SUBMITTER = "conformance-runner"
 
 
-def run_one(artifact: str, vector: dict) -> tuple[bool, str]:
+def _handoff_decisions(vector: dict, library: dict) -> list[str]:
+    """Render each filing decision the way handoff.yaml spells it."""
+    def resolve(to):
+        for version, body in (library.get(to["asop_id"]) or {}).items():
+            if version_in(to, int(version)):
+                return int(version), validate_asop(body, asop_id=to["asop_id"])
+        return None
+
+    filer = vector["filer"]
+    (_, body), = library[filer].items()
+    decisions = plan_handoffs(
+        validate_asop(body, asop_id=filer), outcome=vector.get("outcome"),
+        outputs=vector.get("outputs") or {}, run_inputs=vector.get("run_inputs") or {},
+        requests=vector.get("requests") or [], resolve=resolve, chain=vector.get("chain", "R1"),
+        existing_keys=vector.get("existing_keys") or [],
+    )
+    out = []
+    for d in decisions:
+        if d["action"] == "file":
+            out.append(f"file {d['to']['asop_id']}@{d['to']['version']} {d['subject']}")
+        elif d["action"] == "duplicate":
+            out.append(f"duplicate {d['natural_key']}")
+        else:
+            code = d["code"].split(":", 1)[0] + ":<rule>"
+            if code not in REFUSAL_CODES:
+                out.append(f"uncatalogued {d['code']}")
+            else:
+                out.append(f"refuse {d['code']}")
+    return out
+
+
+def run_one(artifact: str, vector: dict, suite: dict | None = None) -> tuple[bool, str]:
     """Return (matched, what actually happened)."""
     detail_message = ""
     try:
-        if artifact == "gate":
+        if artifact == "handoff":
+            # A filing question (§3.7): every input is in the vector and the
+            # suite's shared library, so two engines must agree line for line.
+            got = _handoff_decisions(vector, (suite or {}).get("library") or {})
+            want = vector["expect"]
+            if got != want:
+                return False, f"expected {want}, got {got}"
+            return True, f"{len(got)} decision(s)"
+        elif artifact == "requires":
+            runs = [{"asop_id": a, "subject": s, "attempt": n, "done": d} for a, s, n, d in vector.get("runs") or []]
+            got = requires_satisfied(vector["requires"], runs=runs, fanned_out=vector.get("fanned_out") or [],
+                                     approved=vector.get("approved") or [])
+            if got != vector["satisfied"]:
+                return False, f"expected satisfied={vector['satisfied']}, got {got}"
+            return True, f"satisfied={got}"
+        elif artifact == "asop":
+            # A record error is `sop_refused` (§10), whichever module found it.
+            try:
+                validate_asop(vector["document"], asop_id=vector.get("asop_id"))
+            except SopContractError as e:
+                raise Refusal("sop_refused", str(e), "fix the record") from e
+        elif artifact == "gate":
             validate_gate(vector["document"])
         elif artifact == "attestation":
             gate = validate_gate(vector["gate"])
@@ -111,7 +165,7 @@ def main() -> int:
         print(f"\n{path.name} — {len(suite['vectors'])} vectors ({artifact})")
         for vector in suite["vectors"]:
             total += 1
-            matched, detail = run_one(artifact, vector)
+            matched, detail = run_one(artifact, vector, suite)
             if not matched:
                 failed += 1
                 print(f"  FAIL  {vector['id']:<34} {detail}")

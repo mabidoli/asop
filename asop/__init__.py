@@ -29,6 +29,18 @@ from asop.gates import (
     validate_attestation,
     validate_gate,
 )
+from asop.chain import (
+    CARDINALITIES,
+    FILING_REQUEST_SCHEMA,
+    HANDOFF_RULES,
+    REQUIRE_KINDS,
+    ChainContractError,
+    plan_handoffs,
+    requires_satisfied,
+    validate_chain_fields,
+    validate_filing_request,
+    validate_handoff_targets,
+)
 from asop.sop import (
     ASOP,
     ASOP_VERSION,
@@ -77,4 +89,15 @@ __all__ = [
     "SopError",
     "SopContractError",
     "validate_fields",
+    # hand-offs (ASOP.md §3.7, v3.5)
+    "CARDINALITIES",
+    "FILING_REQUEST_SCHEMA",
+    "HANDOFF_RULES",
+    "REQUIRE_KINDS",
+    "ChainContractError",
+    "validate_chain_fields",
+    "validate_handoff_targets",
+    "validate_filing_request",
+    "plan_handoffs",
+    "requires_satisfied",
 ]

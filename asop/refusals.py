@@ -113,4 +113,6 @@ CODES: dict[str, str] = {
     "inputs_missing": "a run was filed without an input the ASOP declares by name",
     "role_unbound": "a run was filed with no binding for a role the ASOP declares",
     "constraint_unsatisfiable": "every binding offered for a run violates a `distinct` constraint — the same binding would fill both roles",
+    # -- ASOP v3.5: hand-offs (ASOP.md §3.7, asop.chain) ---------------------
+    "handoff_refused:<rule>": "a finished run's hand-off or filing request was refused; the actual code carries the rule after the colon (asop.chain.HANDOFF_RULES): malformed, undeclared, outcome, cardinality, subject, output, inputs or version",
 }

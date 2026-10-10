@@ -4,6 +4,90 @@ Version history for the ASOP specification. The specification itself is
 [`ASOP.md`](ASOP.md); this file is where it has been, so the specification can be
 about what it is.
 
+## v3.5 / asop-spec 0.5.0 — 2026-10-10
+
+### Hand-offs: an ASOP declares where a finished run may go next (§3.7)
+
+**This reverses §11.4 (2026-09-04), which dropped `next_sop` and put all sequencing
+between procedures in the harness.** The first real chained execution showed what that
+costs. Ten procedures ran end to end, and the flow lived in one engine's rules file and
+driver, outside every ASOP:
+
+- a procedure shared to another harness arrived without its place in any flow;
+- a new flow meant editing the engine;
+- porting the engine meant porting one organisation's flow with it.
+
+The owner chose declared hand-offs (option C) over fixed successors (A, which cannot fan
+out over a count known only at run time) and run-time requests alone (B, under which a
+misbehaving run could file anything). §11.4 now records the reversal and its reasons.
+
+Five optional record fields:
+
+- `outcomes`, a closed set of run outcomes;
+- `outputs`, `[{name, description?, kind?}]`, the mirror of `inputs`;
+- `handoffs` on the predecessor, each with:
+  - `id`;
+  - `to`, a pin or a `>=N[,<M]` range resolved at filing to the ACTIVE version;
+  - `on_outcomes`;
+  - `cardinality: one | many`;
+  - `subject_from` with `where` / `where_not`;
+  - an `inputs` mapping;
+- `on_escalate`, whose target must contain a human step;
+- `requires` on the successor: `run_done`, `all_runs_done` or `human_approved`, as a
+  closed list.
+
+There is also a new output schema, `asop.filing-request/1`
+([`schema/v1/filing-request.yaml`](schema/v1/filing-request.yaml)), and a new refusal,
+`handoff_refused:<rule>`, with eight rules: malformed, undeclared, outcome, cardinality,
+subject, output, inputs and version. The verb table gains `handoff(run_id, requests?)`.
+
+**Corrected from the proposal that motivated it, each for a stated reason:**
+
+- **`outcomes` and `outputs` are declared.** Otherwise `on_outcomes` and `subject_from`
+  name things nothing declares. A misspelt outcome would be a hand-off that silently
+  never fires, and a fan-out would read an output nobody promised to write. That is the
+  inter-procedure contract whose absence let a missing field crash a gate in the same
+  execution.
+- **`requires` keeps three of the six predicates proposed.**
+  - `slot_free` is concurrency, which the same proposal called engine configuration.
+  - `artefact_current` is staleness, which it recommended as an engine duty.
+  - `no_run_for_subject` is redundant with filing being idempotent on the natural key.
+
+  Each is refused by name, with where it belongs instead.
+- **A join counts what was filed; it does not count the subjects again.** A join that
+  re-derived its subjects from the predecessor's output, without the predecessor's
+  filter, would wait forever for runs that would never be filed. So an empty fan-out
+  satisfies its join.
+- **No per-ASOP `retry` section.** §5.4 already fixes the policy at one repair, then a
+  person.
+- **A duplicate natural key is recorded, not refused.** Several predecessors handing off
+  to one join is the normal case, and a replay must file nothing twice without erroring.
+- **Targets use `asop_id`, not `asop`,** as every other pin does.
+- **No self-reference.** An ASOP may not hand off to, escalate to, or wait on itself.
+
+**Compatibility.** Additive for records: every v3.4 record is a valid v3.5 record. It is
+not additive for readers. The schema is closed, so a v3.4 reader refuses a record with
+hand-offs. That is deliberate: dropping hand-offs it did not understand would turn the
+procedure into a dead end. Adopt 0.5.0 before accepting chained records.
+
+### Distribution
+
+- Reference implementation: `asop.chain`, exported from `asop`: `validate_chain_fields`,
+  `validate_handoff_targets`, `validate_filing_request`, `plan_handoffs` and
+  `requires_satisfied`. `validate_asop` gains an optional `asop_id` keyword, so a store
+  can refuse self-reference.
+- Conformance:
+  - three new vector files, `chain-record.yaml` (asop), `handoff.yaml` and
+    `requires.yaml`, with 36 vectors, for 97 in all;
+  - 17 new assertions, A110–A126, all cited;
+  - the reference runner learns three artifact kinds.
+
+  Every vector file was checked by breaking the implementation on purpose, and every
+  test in `tests/test_chain.py` by 15 deliberate mutants, each of which turned it red.
+- Found while cross-checking, and predating this release: `validate_gate`'s normalised
+  output (nulls, `schema_version`) does not validate against the stored step and gate
+  schema. It is recorded in `conformance/README.md` and not changed here.
+
 ## asop-spec 0.4.1 — 2026-10-10
 
 ### `common_mistakes` holds five, not three
