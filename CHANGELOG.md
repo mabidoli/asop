@@ -38,8 +38,27 @@ Five optional record fields:
 
 There is also a new output schema, `asop.filing-request/1`
 ([`schema/v1/filing-request.yaml`](schema/v1/filing-request.yaml)), and a new refusal,
-`handoff_refused:<rule>`, with eight rules: malformed, undeclared, outcome, cardinality,
-subject, output, inputs and version. The verb table gains `handoff(run_id, requests?)`.
+`handoff_refused:<rule>`, with nine rules: malformed, undeclared, outcome, cardinality,
+subject, output, inputs, version and conflict. The verb table gains
+`handoff(run_id, requests?)`.
+
+**The rules that matter most:**
+
+- **A run chooses which, never what.** A filing request names a declared hand-off and,
+  on a fan-out, a subject. It carries no inputs.
+- **A refused request is as if it had not been written.** It never narrows, cancels or
+  alters what the ASOP declared, so one bad request cannot silence a declared fan-out.
+- **A closed outcome set is enforced.** A run that finishes with an outcome its ASOP does
+  not declare files nothing, and that is refused rather than silent.
+- **A join waits until its predecessors are settled.** X is settled when every run that
+  could still file X is done and its hand-offs are recorded, with no refusal on the path.
+  An empty fan-out satisfies its join, and a refused one blocks it for a person.
+- **Filing is idempotent on a percent-encoded natural key.** A re-filing carries the next
+  attempt. The same key with different inputs is a `conflict`.
+- **Comparisons are type-strict.** Subject ids are strings or integers and must be unique;
+  values handed on are scalars; names are exact (refused, never stripped); version
+  ranges are `>=N[,<M]` in ASCII digits with no spaces. Activation refuses cycles across
+  records and any target input left unmapped.
 
 **Corrected from the proposal that motivated it, each for a stated reason:**
 
@@ -54,16 +73,34 @@ subject, output, inputs and version. The verb table gains `handoff(run_id, reque
   - `no_run_for_subject` is redundant with filing being idempotent on the natural key.
 
   Each is refused by name, with where it belongs instead.
-- **A join counts what was filed; it does not count the subjects again.** A join that
-  re-derived its subjects from the predecessor's output, without the predecessor's
-  filter, would wait forever for runs that would never be filed. So an empty fan-out
-  satisfies its join.
+- **Requests carry no inputs.** The proposal let a request supply inputs, which made a
+  successor's inputs depend on what a run wrote, and made the activation check either
+  too strict or meaningless.
 - **No per-ASOP `retry` section.** §5.4 already fixes the policy at one repair, then a
   person.
-- **A duplicate natural key is recorded, not refused.** Several predecessors handing off
-  to one join is the normal case, and a replay must file nothing twice without erroring.
-- **Targets use `asop_id`, not `asop`,** as every other pin does.
-- **No self-reference.** An ASOP may not hand off to, escalate to, or wait on itself.
+- **A duplicate with the same inputs is recorded, not refused.** Several predecessors
+  handing off to one join is the normal case.
+- **Targets use `asop_id`, not `asop`,** as every other pin does. There is one hand-off
+  per target.
+
+**Hardened before release by an adversarial review.** A first cut of this release was
+reviewed before anything was published. The review confirmed 13 defects, and each now has
+a test that fails when the defect is reintroduced; 18 deliberate mutants were run and
+every one was caught. The defects:
+
+- one refused request could cancel a declared fan-out;
+- an undeclared outcome silently suppressed every hand-off;
+- a join fired when the first predecessor finished, and read a refused fan-out as empty;
+- the activation check contradicted the prose;
+- the natural key ignored attempts, could not tell two hand-offs apart, and could be
+  forged with `|`;
+- a non-string `requires` kind crashed instead of being refused;
+- names were stripped instead of refused, so two keys could collide;
+- the schema and the Python disagreed on the range grammar and on subjects;
+- `where` and subject ids used loose equality;
+- the decision order was normative but unstated;
+- path semantics were unstated;
+- a cycle across records passed.
 
 **Compatibility.** Additive for records: every v3.4 record is a valid v3.5 record. It is
 not additive for readers. The schema is closed, so a v3.4 reader refuses a record with
@@ -72,18 +109,19 @@ procedure into a dead end. Adopt 0.5.0 before accepting chained records.
 
 ### Distribution
 
-- Reference implementation: `asop.chain`, exported from `asop`: `validate_chain_fields`,
-  `validate_handoff_targets`, `validate_filing_request`, `plan_handoffs` and
-  `requires_satisfied`. `validate_asop` gains an optional `asop_id` keyword, so a store
-  can refuse self-reference.
+- Reference implementation: `asop.chain`, exported from `asop`:
+  - `validate_chain_fields`, `validate_handoff_targets` and `validate_filing_request`;
+  - `plan_handoffs` and `plan_escalation`;
+  - `predecessors_of` and `requires_satisfied`.
+
+  `validate_asop` gains an optional `asop_id` keyword, so a store can refuse
+  self-reference.
 - Conformance:
   - three new vector files, `chain-record.yaml` (asop), `handoff.yaml` and
-    `requires.yaml`, with 36 vectors, for 97 in all;
-  - 17 new assertions, A110–A126, all cited;
+    `requires.yaml`, with 51 vectors, for 112 in all;
+  - 21 new assertions, A110–A130, of which 20 are cited by a vector. A130 needs a
+    resolver, so the Python tests cover it;
   - the reference runner learns three artifact kinds.
-
-  Every vector file was checked by breaking the implementation on purpose, and every
-  test in `tests/test_chain.py` by 15 deliberate mutants, each of which turned it red.
 - Found while cross-checking, and predating this release: `validate_gate`'s normalised
   output (nulls, `schema_version`) does not validate against the stored step and gate
   schema. It is recorded in `conformance/README.md` and not changed here.

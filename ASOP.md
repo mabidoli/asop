@@ -300,32 +300,50 @@ on_escalate:
   inputs: {question_kind: escalation}
 ```
 
-- **It fires** when the run completes (§5.5) with an outcome in `on_outcomes`. A hand-off
-  that does not fire is not a refusal: it is the run saying "stop here".
-- **`one`** files one run, whose subject is the chain. Five predecessors handing off to one
-  successor file it once (see idempotency below), which is how a join gets filed.
-- **`many`** files one run per subject that `subject_from` yields:
-  - it walks the named output's array;
-  - it keeps items whose fields are in `where`, and drops items with a field equal to
-    `where_not`;
-  - it takes `id_field` as the subject.
+- **A closed set is closed.** When an ASOP declares `outcomes`, a run that finishes with
+  any other outcome (or none) files nothing, and that is refused (`outcome`). Without
+  this, a misspelt outcome would silently suppress every hand-off.
+- **It fires** when the run completes (§5.5) with an outcome in `on_outcomes`, or on every
+  completion when `on_outcomes` is absent. A hand-off that does not fire is not a refusal:
+  it is the run saying "stop here".
+- **`one`** files one run, whose subject is the chain. Several predecessors handing off to
+  the same successor file it once (see the natural key below), which is how a join is
+  filed.
+- **`many`** files one run per subject that `subject_from` yields. The run's `output` must
+  be a mapping, and `array` is a dot-separated path of keys within it that leads to a
+  list of mappings. An item is kept when two conditions hold:
+  - every `where` field is present and has one of the listed values;
+  - no `where_not` field equals its value.
 
-  This is how a plan fans out one build per task, a count known only at run time. Two
-  `many` hand-offs over the same output with different `where` route subjects by kind.
+  Both comparisons are **type-strict**: `true` is not `1`, and `1` is not `"1"`. A kept
+  item's `id_field` must be a string or an integer, and it is the subject. Two kept items
+  with the same subject are refused (`output`), because which one was meant is not the
+  engine's to guess. Two `many` hand-offs to different targets, with different `where`
+  filters over the same output, route subjects by kind.
+- **One hand-off per target.** Two hand-offs to the same `asop_id` would share natural
+  keys, and which inputs a run received would depend on order.
 - **Input references:**
-  - `$subject` and `$subject.<field>`, on `many` only;
+  - `$subject`;
+  - `$subject.<field>`: one key, no path, on `many` only;
   - `$run.inputs.<declared input>`;
-  - `$run.outputs.<declared output>`;
-  - anything else is a scalar literal, and `$$` writes a literal `$`.
+  - `$run.outputs.<declared output>`.
 
-  Everything a reference names is declared, so a typo is refused where it is written.
-- **A target** is a pin `{asop_id, version}` or a range `{asop_id, versions}`, where
-  `versions` is `">=N"` or `">=N,<M"` and nothing else. A range resolves **at filing** to
-  the successor's ACTIVE version inside it, and the filed run pins that version. Outcomes
-  still attach to versions, never to ranges (§2.1).
-- **No self-reference.** An ASOP may not hand off to, escalate to, or wait on its own
-  `asop_id`. A loop is a nested step or a repair (§5.4). A procedure that files itself
-  has no bound.
+  Anything else is a scalar literal, and `$$` writes a literal `$`. Everything a reference
+  names is declared, so a typo is refused where it is written. Every value handed on must
+  be a **scalar**: a structure would get around the literal rule and leave staleness
+  hashing undefined, so hand a name or a path instead. A successor is handed **exactly**
+  its declared inputs, no more and no fewer, and this is checked at activation and again
+  at filing.
+- **Names are exact.** That covers ids, input keys, `where` keys, outcomes, outputs and
+  artefacts. A name with surrounding whitespace is refused, not stripped, because
+  stripping is how `a` and ` a` collide.
+- **A target** is a pin `{asop_id, version}` or a range `{asop_id, versions}`, never
+  both. `versions` is `">=N"` or `">=N,<M"`: ASCII digits, no spaces, N ≥ 1 and M > N. A
+  range resolves **at filing** to the successor's ACTIVE version inside it, and the filed
+  run pins that version. Outcomes still attach to versions, never to ranges (§2.1).
+- **No cycles.** An ASOP may not hand off to, escalate to, or wait on its own `asop_id`.
+  At activation, the graph reachable through hand-offs and escalations must be acyclic.
+  A loop is a nested step or a repair (§5.4); a cycle through a fan-out has no bound.
 
 **A filing request** (`asop.filing-request/1`, [schema](schema/v1/filing-request.yaml)) is
 a finished run's own choice, written by its final step. There can be zero or more.
@@ -335,35 +353,46 @@ a finished run's own choice, written by its final step. There can be zero or mor
  subject: s2, reason: "only the second source changed"}
 ```
 
-A request **narrows or supplements** a declared hand-off; it never creates one.
+A run chooses **which**, never **what**: a request names a declared hand-off and, on a
+`many` hand-off, a subject. It carries no inputs. If a `many` hand-off has **accepted**
+requests, exactly those subjects are filed. Otherwise the engine expands the whole
+declaration, so a model step never has to enumerate subjects by hand. **A refused
+request is as if it had not been written.** It never narrows, cancels or alters what the
+ASOP declared. Without this rule, one bad request from a misbehaving run would silence a
+declared fan-out, which is the hole option B left open. A `one` hand-off with more than
+one request, or with a request that names a subject, refuses those requests and still
+files.
 
-- **`many`, with requests:** exactly the requested subjects are filed. Each must be one
-  that `subject_from` yields.
-- **`many`, without requests:** the engine expands the hand-off itself, so a model step
-  never has to enumerate subjects by hand.
-- **`one`:** at most one request, and it may not name a subject.
-- **Inputs:** a request may supply a successor input the declaration leaves unmapped. It
-  may never override one the declaration maps.
-
-**Refuse, never repair.** At filing, the engine checks each decision and refuses with
-`handoff_refused:<rule>`:
+**Refuse, never repair.** At filing, the engine refuses with `handoff_refused:<rule>`:
 
 | rule | refused when |
 |---|---|
-| `malformed` | the request is not a valid `asop.filing-request/1` |
+| `malformed` | the request is not a valid `asop.filing-request/1` (including one carrying `inputs`), or the requests are not a list |
 | `undeclared` | it names a hand-off the filing ASOP does not declare, or a different target |
-| `outcome` | the run's outcome is not one the hand-off fires on |
+| `outcome` | the run's outcome is not a declared one, or not one the requested hand-off fires on |
 | `cardinality` | a `one` hand-off received more than one request |
 | `subject` | a requested subject is not yielded, or a `one` request names one |
-| `output` | the output a fan-out reads is missing or lacks the declared shape |
-| `inputs` | the successor's declared inputs are not exactly satisfied, or a request overrides a mapping |
+| `output` | the output a fan-out reads is missing, lacks the declared shape, or yields an unusable or repeated subject |
+| `inputs` | the successor's declared inputs are not exactly satisfied by scalar values |
 | `version` | no ACTIVE version of the successor is inside the declared range |
+| `conflict` | a run with this natural key was already filed with different inputs |
 
-Every refusal is recorded; none is silently dropped. A refused request does not narrow
-its hand-off, so the declared expansion still fires. Filing is **idempotent** on the
-natural key `{chain}|{asop_id}|{subject}|a{attempt}`. A second filing for a key that
-exists is a recorded **duplicate**, not a refusal: several predecessors handing off to
-one join is the normal case, and a replayed ledger files nothing twice.
+Every refusal is recorded; none is silently dropped.
+
+**The order of decisions is normative**, so that two engines agree line for line:
+- an undeclared outcome is a single decision on its own;
+- otherwise, each request in the order written;
+- then each declared hand-off in declaration order, with its subjects in output order
+  (or request order).
+
+**Idempotency.** Filing is idempotent on the natural key
+`{chain}|{asop_id}|{subject}|a{attempt}`, with `%` and `|` percent-encoded in each part.
+- Filing the same key again **with the same inputs** is a recorded **duplicate**, not a
+  refusal. Several predecessors handing off to one join is the normal case, and a
+  replayed ledger files nothing twice.
+- Filing the same key **with different inputs** is a `conflict`, so which inputs a join
+  receives never depends on which predecessor finished first.
+- When the engine re-files downstream of a stale input, it files the next **attempt**.
 
 **`requires`** sits on the procedure that waits, because it is the only one that sees
 every predecessor. It is evaluated within one chain, and every predicate must hold
@@ -376,33 +405,54 @@ requires:
   - {kind: human_approved, artefact: research-review}
 ```
 
-- **`run_done(X)`**: at least one run of X exists, and the latest attempt of each is done.
-- **`all_runs_done(X)`**: a hand-off toward X has been processed, and the latest attempt
-  of every run it filed is done. **An empty fan-out satisfies it.** A join must not count
-  the subjects again from the predecessor's output. It counts what was filed, so a filter
-  can never leave it waiting for runs that will never exist.
-- **`human_approved(A)`**: a declared human (§9) approved artefact A. The engine resolves
-  the approver; the record names only what is approved.
+Only the highest attempt per `(asop_id, subject)` counts. **X is settled** when no further
+run of X can be filed. That means every run of every ASOP that can transitively file X
+(through hand-offs or escalations, in the active library) meets three conditions:
+- it is done;
+- it has been **processed**: its completion was evaluated and its hand-off decisions
+  recorded, including when nothing fired;
+- it has no refused hand-off toward X or toward one of those ASOPs.
+
+A refusal is a blocker that needs a person, never an empty result. An ancestor that never
+ran, because an earlier outcome closed its branch, has no runs and blocks nothing.
+
+- **`run_done(X)`**: X is settled, at least one run of X exists, and every run of X is
+  done.
+- **`all_runs_done(X)`**: X is settled and every run of X is done, **including when there
+  are none**. An empty fan-out is a finished one. A join that waited for runs a filter
+  guaranteed would never be filed would deadlock, and one that fired when the first
+  predecessor finished would start early.
+- **`human_approved(A)`**: a declared human (§9) approved artefact A **in this chain**. The
+  engine resolves the approver; the record names only what is approved.
 
 The kinds are a **closed list**. A predicate two engines evaluate differently is a fork of
 the contract, so the list grows by spec version, never by author.
 
-**Escalation.** `on_escalate` names the procedure that §5.4's second failure files. Its
-target must contain a step a human role does, because an escalation reaches a person. Its
-inputs read only the run's inputs and literals, since the run has not finished writing its
-outputs. The engine adds the escalation's own context: what failed, and why.
+**Escalation.** `on_escalate` names the procedure that §5.4's second failure files. If it
+is absent, the gate's own `escalate_to` applies.
+- **Target.** It must contain a step a human role does, because an escalation reaches a
+  person.
+- **Inputs.** The mapping reads only the run's inputs and literals, since the run has not
+  finished writing its outputs. Declared inputs the mapping leaves open are filled from
+  the engine's escalation **context**: what failed, and why. Context keys the target does
+  not declare are ignored. A declared input that neither the mapping nor the context
+  supplies is refused (`inputs`).
+- **Subject.** The engine chooses it, never the run. By convention it is
+  `<asop_id>/<run subject>/<step>`.
+- **The run continues.** The escalated run is not cancelled. Once the person answers and
+  the run completes, its hand-offs fire like any other run's.
 
 **Engine duties.** These stay out of the artefact, because they are the same for every
 flow:
-
 - **Starting a chain.** The first procedure is filed by `run` (§5.1), as always.
 - **Concurrency and budget:** slots, waves and spend caps.
 - **Staleness.** The engine records each run's parent run and input hashes. When an
-  input changes, it re-files downstream as a new attempt.
+  input changes, it re-files downstream as the next attempt.
 - **Retries.** §5.4 already fixes the policy: one repair, then a person. It is not
   declared per ASOP.
-- **Recording.** Every hand-off is ledgered as filed, duplicate or refused, together with
-  the parent run.
+- **Recording.** Every hand-off decision is ledgered with its parent run: filed,
+  duplicate or refused. That includes the targets a refused hand-off would have filed,
+  which is what keeps a join from reading a refusal as an empty result.
 - **Re-evaluating `requires`** whenever the chain's state changes.
 
 **Compatibility.** The record schema is closed (`additionalProperties: false`), so a v3.4
@@ -410,14 +460,17 @@ reader **refuses** a record that declares hand-offs. That is deliberate: a reade
 dropped the hand-offs it did not understand would run the procedure as a dead end. Adopt
 `asop-spec` 0.5.0 before accepting chained records. A v3.4 record is a valid v3.5 record.
 
-The reference implementation is `asop.chain`:
+The reference implementation is `asop.chain`. Every function is pure:
 - `validate_chain_fields` checks one record.
-- `validate_handoff_targets` checks across records at activation, given a resolver.
+- `validate_handoff_targets` checks across records at activation, given a resolver,
+  including acyclicity.
 - `plan_handoffs` makes the filing decisions.
+- `plan_escalation` makes the escalation filing.
+- `predecessors_of` builds the graph that `requires_satisfied` reads.
 - `requires_satisfied` makes the start decision.
 
-All four are pure functions, and all are pinned by the conformance vectors in
-`handoff.yaml`, `requires.yaml` and `chain-record.yaml`.
+All of them are pinned by the conformance vectors in `chain-record.yaml`, `handoff.yaml`
+and `requires.yaml`.
 
 ---
 
@@ -915,7 +968,7 @@ stack trace. Codes relevant to ASOPs, from `asop.refusals`, plus the ones v3 add
 | **`inputs_missing`** *(v3)* | a declared run input was not supplied |
 | **`role_unbound`** *(v3)* | no binding for a role |
 | **`constraint_unsatisfiable`** *(v3)* | every binding violates a `distinct` constraint |
-| **`handoff_refused:<rule>`** *(v3.5)* | a finished run's hand-off or filing request was refused; the rule is one of §3.7's eight |
+| **`handoff_refused:<rule>`** *(v3.5)* | a finished run's hand-off or filing request was refused; the rule is one of §3.7's nine |
 
 ---
 
@@ -948,13 +1001,13 @@ stack trace. Codes relevant to ASOPs, from `asop.refusals`, plus the ones v3 add
    **REVERSED 2026-10-10 (v3.5), by the same owner, on evidence.** The first real
    chained execution put the orchestration layer exactly where this decision said: in
    the harness. Its flow ended up in one engine's rules file and driver, outside every
-   ASOP. The hub could not share a procedure's place in the flow, and a second engine
+   ASOP. A plane could not share a procedure's place in the flow, and a second engine
    could only copy it. Of three options, the owner chose C over the alternatives:
    - **A, fixed successors only.** It cannot fan out a count known only at run time.
    - **B, run-time requests only.** A misbehaving run could file anything, and nothing
      would check it.
-   - **C, chosen.** The ASOP declares where it **may** hand off; the run says which of
-     those hand-offs it takes; the engine refuses anything undeclared (§3.7).
+   - **C, chosen.** The ASOP declares where it **may** hand off; the run chooses which
+     subjects; the engine refuses anything undeclared (§3.7).
 
    What survives of the original decision: the ASOP still executes nothing, and choosing
    which procedure *starts* a chain is still the harness's. `next_sop` stays dropped.

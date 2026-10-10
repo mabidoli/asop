@@ -1,14 +1,17 @@
 # Conformance vectors — given a finished run, WHAT IS FILED NEXT? (§3.7, v3.5)
 #
 # A hand-off is a decision made from documents: the filing ASOP, the run's
-# outcome and outputs, the requests it wrote, the successors' records, and the
-# natural keys already filed. Every input is here, so two engines reading this
-# file must reach the same filings and the same refusals, in the same order.
+# outcome and outputs, the requests it wrote, the successors' records, and what
+# was filed before. Every input is here, so two engines reading this file must
+# reach the same filings and the same refusals, in the same order.
 #
 # `library` is shared by every vector: asop_id -> {version: body}, where the
-# version listed is the ACTIVE one. `expect` lists each decision as
+# version listed is the ACTIVE one. `existing` maps a natural key already filed
+# to the inputs it was filed with. `expect` lists each decision as
 # `file <asop_id>@<version> <subject>`, `duplicate <natural key>`, or
-# `refuse <code>` — the order is declaration order, requests first.
+# `refuse <code>`. The ORDER IS NORMATIVE (§3.7): an undeclared outcome alone;
+# otherwise each request in the order written, then each declared hand-off in
+# declaration order, its subjects in output (or request) order.
 
 artifact: handoff
 library:
@@ -51,6 +54,8 @@ x-sources: &sources
       - {id: s3, kind: ticket}
       - {id: s4, kind: spec, removed: true}
 
+x-both: &both ["file extract@2 s1", "file extract@2 s2"]
+
 vectors:
   - id: ho-fan-out-expands-with-filters
     asserts: [A117, A118, A121]
@@ -58,7 +63,7 @@ vectors:
     outcome: FETCHED
     outputs: *sources
     run_inputs: {root: R1}
-    expect: ["file extract@2 s1", "file extract@2 s2"]
+    expect: *both
     because: "s3 fails `where`, s4 hits `where_not`; the range >=2 resolves to the active v2 and pins it"
 
   - id: ho-outcome-not-listed-files-nothing
@@ -69,6 +74,15 @@ vectors:
     run_inputs: {root: R1}
     expect: []
     because: "a hand-off that does not fire is not a refusal; it is the run saying stop"
+
+  - id: ho-refuse-undeclared-outcome
+    asserts: [A127]
+    filer: intake
+    outcome: OKAY
+    outputs: *sources
+    run_inputs: {root: R1}
+    expect: ["refuse handoff_refused:outcome"]
+    because: "a closed set is closed: an outcome the ASOP never declared files nothing and says so, instead of silently suppressing every hand-off"
 
   - id: ho-empty-fan-out-files-nothing
     asserts: [A118]
@@ -97,7 +111,7 @@ vectors:
     run_inputs: {root: R1}
     requests: [{schema: asop.filing-request/1, handoff: extract-all, to: extract, subject: s1}]
     expect: ["refuse handoff_refused:undeclared", "file extract@2 s1", "file extract@2 s2"]
-    because: "a refused request is recorded and does not narrow the declared hand-off"
+    because: "a refused request is as if it had not been written; the declared hand-off still fires in full"
 
   - id: ho-refuse-target-mismatch
     asserts: [A123]
@@ -119,25 +133,37 @@ vectors:
     expect: ["refuse handoff_refused:outcome"]
     because: "a request cannot fire a hand-off its own outcome closed"
 
-  - id: ho-refuse-filtered-subject
+  - id: ho-refused-subject-does-not-cancel
     asserts: [A118, A123]
     filer: intake
     outcome: FETCHED
     outputs: *sources
     run_inputs: {root: R1}
     requests: [{schema: asop.filing-request/1, handoff: extract-each-source, to: extract, subject: s3}]
-    expect: ["refuse handoff_refused:subject"]
-    because: "s3 exists in the output but the declaration filters it out; a run may not file it anyway"
+    expect: ["refuse handoff_refused:subject", "file extract@2 s1", "file extract@2 s2"]
+    because: "THE SUPPRESSION CASE. s3 is filtered out, so the request is refused — and a refused request must not cancel the declared fan-out, or one bad request from a misbehaving run silences it"
 
-  - id: ho-refuse-override
+  - id: ho-good-request-beside-a-bad-one
+    asserts: [A118, A123]
+    filer: intake
+    outcome: FETCHED
+    outputs: *sources
+    run_inputs: {root: R1}
+    requests:
+      - {schema: asop.filing-request/1, handoff: extract-each-source, to: extract, subject: s9}
+      - {schema: asop.filing-request/1, handoff: extract-each-source, to: extract, subject: s2}
+    expect: ["refuse handoff_refused:subject", "file extract@2 s2"]
+    because: "the accepted request still narrows; the refused one has no effect"
+
+  - id: ho-refuse-request-with-inputs
     asserts: [A120, A123]
     filer: intake
     outcome: FETCHED
     outputs: *sources
     run_inputs: {root: R1}
     requests: [{schema: asop.filing-request/1, handoff: extract-each-source, to: extract, subject: s1, inputs: {root: ELSEWHERE}}]
-    expect: ["refuse handoff_refused:inputs"]
-    because: "a request may supply what the declaration leaves open, never replace what it fixes"
+    expect: ["refuse handoff_refused:malformed", "file extract@2 s1", "file extract@2 s2"]
+    because: "a run chooses which, never what — a request carries no inputs"
 
   - id: ho-refuse-malformed
     asserts: [A123]
@@ -158,23 +184,49 @@ vectors:
     expect: ["refuse handoff_refused:output"]
     because: "the output does not have the array the declaration names — a contract break between procedures, caught at the hand-off"
 
-  - id: ho-refuse-one-twice
+  - id: ho-refuse-ambiguous-subjects
+    asserts: [A118, A123]
+    filer: intake
+    outcome: FETCHED
+    outputs: {sources: {sources: [{id: 1, kind: spec}, {id: "1", kind: spec}]}}
+    run_inputs: {root: R1}
+    expect: ["refuse handoff_refused:output"]
+    because: "1 and \"1\" are both subject \"1\"; which item was meant is not the engine's to guess"
+
+  - id: ho-where-is-type-strict
+    asserts: [A118]
+    filer: intake
+    outcome: FETCHED
+    outputs: {sources: {sources: [{id: s1, kind: spec, removed: 1}, {id: s2, kind: spec, removed: true}]}}
+    run_inputs: {root: R1}
+    expect: ["file extract@2 s1"]
+    because: "`where_not: {removed: true}` excludes true, not 1 — an engine with strict equality must agree"
+
+  - id: ho-one-twice-refused-still-files
     asserts: [A119, A123]
     filer: extract
     run_inputs: {root: R1}
     requests:
       - {schema: asop.filing-request/1, handoff: join, to: consolidate}
       - {schema: asop.filing-request/1, handoff: join, to: consolidate}
-    expect: ["refuse handoff_refused:cardinality"]
-    because: "`one` means one"
+    expect: ["refuse handoff_refused:cardinality", "file consolidate@1 R1"]
+    because: "`one` means one: the requests are refused and disregarded, and the declared hand-off still fires"
 
   - id: ho-join-filed-once
     asserts: [A119, A122]
     filer: extract
     run_inputs: {root: R1}
-    existing_keys: ["R1|consolidate|R1|a1"]
+    existing: {"R1|consolidate|R1|a1": {root: R1}}
     expect: ["duplicate R1|consolidate|R1|a1"]
     because: "the second of five extract runs handing off to one join: recorded, not refused, not filed"
+
+  - id: ho-join-conflict
+    asserts: [A128]
+    filer: extract
+    run_inputs: {root: R1}
+    existing: {"R1|consolidate|R1|a1": {root: ELSEWHERE}}
+    expect: ["refuse handoff_refused:conflict"]
+    because: "the same run already filed with different inputs; which inputs it gets must not depend on who finished first"
 
   - id: ho-replay-files-nothing
     asserts: [A122]
@@ -182,6 +234,17 @@ vectors:
     outcome: FETCHED
     outputs: *sources
     run_inputs: {root: R1}
-    existing_keys: ["R1|extract|s1|a1", "R1|extract|s2|a1"]
+    existing: {"R1|extract|s1|a1": {source_id: s1, root: R1}, "R1|extract|s2|a1": {source_id: s2, root: R1}}
     expect: ["duplicate R1|extract|s1|a1", "duplicate R1|extract|s2|a1"]
     because: "a replayed ledger files nothing twice"
+
+  - id: ho-stale-refile-next-attempt
+    asserts: [A122]
+    filer: intake
+    outcome: FETCHED
+    outputs: *sources
+    run_inputs: {root: R1}
+    attempt: 2
+    existing: {"R1|extract|s1|a1": {source_id: s1, root: R1}}
+    expect: *both
+    because: "re-filing downstream of a stale input is a new attempt, not a duplicate"

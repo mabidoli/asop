@@ -162,3 +162,66 @@ vectors:
     refusal: sop_refused
     reaches: "never its outputs"
     because: "an escalation happens before the run has finished writing"
+
+  - id: cr-refuse-two-handoffs-one-target
+    asserts: [A129]
+    document:
+      <<: *base
+      handoffs:
+        - {id: a, to: {asop_id: next, version: 1}, inputs: {x: one}}
+        - {id: b, to: {asop_id: next, version: 1}, inputs: {x: two}}
+    expect: refuse
+    refusal: sop_refused
+    reaches: "One hand-off per target"
+    because: "two hand-offs to one target share natural keys; which inputs a run gets would depend on order"
+
+  - id: cr-refuse-subject-path
+    asserts: [A113]
+    document:
+      <<: *base
+      outputs: [{name: o}]
+      handoffs: [{id: h, to: {asop_id: next, version: 1}, cardinality: many, subject_from: {output: o, array: items, id_field: id}, inputs: {x: $subject.m.n}}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "one field"
+    because: "`$subject.<field>` is one key; a path would be a second, unstated grammar"
+
+  - id: cr-refuse-range-zero
+    asserts: [A114]
+    document:
+      <<: *base
+      handoffs: [{id: h, to: {asop_id: next, versions: ">=0"}}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "only two forms"
+    because: "versions start at 1"
+
+  - id: cr-refuse-range-spaced
+    asserts: [A114]
+    document:
+      <<: *base
+      handoffs: [{id: h, to: {asop_id: next, versions: ">= 2"}}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "only two forms"
+    because: "one spelling, so the schema pattern and every parser agree"
+
+  - id: cr-refuse-whitespace-name
+    asserts: [A113]
+    document:
+      <<: *base
+      handoffs: [{id: h, to: {asop_id: next, version: 1}, inputs: {"x ": one}}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "surrounding whitespace"
+    because: "names are matched exactly; stripping is how two keys collide"
+
+  - id: cr-refuse-non-string-kind
+    asserts: [A115]
+    document:
+      <<: *base
+      requires: [{kind: [run_done], asop_id: x}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "'kind' must be one of"
+    because: "a refusal, not a crash"

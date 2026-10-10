@@ -2,53 +2,85 @@
 #
 # `requires` is declared on the procedure that waits, because it is the only
 # one that sees every predecessor. Each vector gives the predicates, the
-# chain's runs (`[asop_id, subject, attempt, done]`), the ASOPs a hand-off has
-# already been processed toward, and the artefacts a declared human approved.
+# chain's runs as `[asop_id, subject, attempt, done, processed, refused_toward?]`,
+# the predecessor graph (asop_id -> the ASOPs that can file it, from the active
+# library), and the artefacts a declared human approved in this chain.
+#
+# X is SETTLED when no further run of X can be filed: every run of every ASOP
+# that can transitively file X is done and processed, and none has a refused
+# hand-off toward X or toward one of those ASOPs.
 
 artifact: requires
+x-preds: &preds {extract: [intake], consolidate: [extract]}
 vectors:
   - id: rq-join-waits-for-every-run
     asserts: [A124]
     requires: [{kind: all_runs_done, asop_id: extract}]
-    runs: [[extract, s1, 1, true], [extract, s2, 1, false]]
-    fanned_out: [extract]
+    predecessors: *preds
+    runs: [[intake, R1, 1, true, true], [extract, s1, 1, true, true], [extract, s2, 1, false, false]]
     satisfied: false
     because: "one of two filed runs is still open"
 
   - id: rq-join-holds-when-all-done
     asserts: [A124]
     requires: [{kind: all_runs_done, asop_id: extract}]
-    runs: [[extract, s1, 1, true], [extract, s2, 1, true]]
-    fanned_out: [extract]
+    predecessors: *preds
+    runs: [[intake, R1, 1, true, true], [extract, s1, 1, true, true], [extract, s2, 1, true, true]]
     satisfied: true
-    because: "every filed run is done"
+    because: "the fan-out was processed and every run it filed is done"
 
-  - id: rq-join-waits-for-the-fan-out
+  - id: rq-join-waits-for-processing
     asserts: [A124]
     requires: [{kind: all_runs_done, asop_id: extract}]
-    runs: []
-    fanned_out: []
+    predecessors: *preds
+    runs: [[intake, R1, 1, true, false]]
     satisfied: false
-    because: "nothing has been fanned out yet, so 'all of none' is not yet true"
+    because: "the predecessor finished but its hand-offs are not yet recorded; more runs of extract may still be filed"
 
   - id: rq-empty-fan-out-satisfies-join
     asserts: [A124]
     requires: [{kind: all_runs_done, asop_id: extract}]
-    runs: []
-    fanned_out: [extract]
+    predecessors: *preds
+    runs: [[intake, R1, 1, true, true]]
     satisfied: true
     because: "THE DEADLOCK CASE. The fan-out ran and its filter yielded nothing; a join waiting for runs that will never exist never fires"
+
+  - id: rq-refused-fan-out-blocks
+    asserts: [A124]
+    requires: [{kind: all_runs_done, asop_id: extract}]
+    predecessors: *preds
+    runs: [[intake, R1, 1, true, true, [extract]]]
+    satisfied: false
+    because: "a refused fan-out is a blocker for a person, never an empty result — otherwise the join starts on missing data"
+
+  - id: rq-sibling-predecessor-still-open
+    asserts: [A125]
+    requires: [{kind: run_done, asop_id: consolidate}]
+    predecessors: *preds
+    runs: [[extract, s1, 1, true, true], [extract, s2, 1, false, false], [consolidate, R1, 1, true, true]]
+    satisfied: false
+    because: "THE EARLY-JOIN CASE. An open sibling can still hand off; the first predecessor to finish does not settle the successor"
+
+  - id: rq-branch-never-taken
+    asserts: [A124]
+    requires: [{kind: all_runs_done, asop_id: consolidate}]
+    predecessors: *preds
+    runs: [[intake, R1, 1, true, true]]
+    satisfied: true
+    because: "intake's outcome closed the branch: no extract ran, so no consolidate can be filed — nothing to wait for"
 
   - id: rq-latest-attempt-counts
     asserts: [A125]
     requires: [{kind: run_done, asop_id: consolidate}]
-    runs: [[consolidate, R1, 2, false], [consolidate, R1, 1, true]]
+    predecessors: *preds
+    runs: [[consolidate, R1, 2, false, false], [consolidate, R1, 1, true, true]]
     satisfied: false
     because: "attempt 2 superseded attempt 1, whatever order the ledger lists them in"
 
   - id: rq-run-done-needs-a-run
     asserts: [A125]
     requires: [{kind: run_done, asop_id: consolidate}]
+    predecessors: *preds
     runs: []
     satisfied: false
     because: "unlike a join, run_done is about a run that must exist"
@@ -56,15 +88,17 @@ vectors:
   - id: rq-approval-required
     asserts: [A115]
     requires: [{kind: run_done, asop_id: consolidate}, {kind: human_approved, artefact: research-review}]
-    runs: [[consolidate, R1, 1, true]]
+    predecessors: *preds
+    runs: [[extract, s1, 1, true, true], [consolidate, R1, 1, true, true]]
     approved: []
     satisfied: false
-    because: "every predicate must hold; the approval has not happened"
+    because: "every predicate must hold; the approval has not happened in this chain"
 
   - id: rq-all-predicates-hold
     asserts: [A115]
     requires: [{kind: run_done, asop_id: consolidate}, {kind: human_approved, artefact: research-review}]
-    runs: [[consolidate, R1, 1, true]]
+    predecessors: *preds
+    runs: [[extract, s1, 1, true, true], [consolidate, R1, 1, true, true]]
     approved: [research-review]
     satisfied: true
-    because: "run done and approved"
+    because: "settled, done, approved"

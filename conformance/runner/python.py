@@ -45,7 +45,7 @@ def _handoff_decisions(vector: dict, library: dict) -> list[str]:
         validate_asop(body, asop_id=filer), outcome=vector.get("outcome"),
         outputs=vector.get("outputs") or {}, run_inputs=vector.get("run_inputs") or {},
         requests=vector.get("requests") or [], resolve=resolve, chain=vector.get("chain", "R1"),
-        existing_keys=vector.get("existing_keys") or [],
+        existing=vector.get("existing") or {}, attempt=vector.get("attempt", 1),
     )
     out = []
     for d in decisions:
@@ -75,8 +75,10 @@ def run_one(artifact: str, vector: dict, suite: dict | None = None) -> tuple[boo
                 return False, f"expected {want}, got {got}"
             return True, f"{len(got)} decision(s)"
         elif artifact == "requires":
-            runs = [{"asop_id": a, "subject": s, "attempt": n, "done": d} for a, s, n, d in vector.get("runs") or []]
-            got = requires_satisfied(vector["requires"], runs=runs, fanned_out=vector.get("fanned_out") or [],
+            # each run: [asop_id, subject, attempt, done, processed, refused_toward?]
+            runs = [{"asop_id": r[0], "subject": r[1], "attempt": r[2], "done": r[3], "processed": r[4],
+                     "refused_toward": r[5] if len(r) > 5 else []} for r in vector.get("runs") or []]
+            got = requires_satisfied(vector["requires"], runs=runs, predecessors=vector.get("predecessors") or {},
                                      approved=vector.get("approved") or [])
             if got != vector["satisfied"]:
                 return False, f"expected satisfied={vector['satisfied']}, got {got}"

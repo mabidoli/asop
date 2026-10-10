@@ -35,7 +35,9 @@ from asop.chain import (
     HANDOFF_RULES,
     REQUIRE_KINDS,
     ChainContractError,
+    plan_escalation,
     plan_handoffs,
+    predecessors_of,
     requires_satisfied,
     validate_chain_fields,
     validate_filing_request,
@@ -99,5 +101,7 @@ __all__ = [
     "validate_handoff_targets",
     "validate_filing_request",
     "plan_handoffs",
+    "plan_escalation",
+    "predecessors_of",
     "requires_satisfied",
 ]

@@ -2,10 +2,11 @@
 # Filing request — a finished run's own choice of what to file next (§3.7).
 #
 # JSON Schema draft 2020-12, authored in YAML. Written by a run's final step,
-# zero or more per run. A request NARROWS or SUPPLEMENTS a declared hand-off;
-# it never creates one. Anything a request asks for that the filing ASOP did
-# not declare is refused as `handoff_refused:<rule>` and recorded — refused,
-# never repaired, never silently dropped.
+# zero or more per run. A request NARROWS a declared fan-out by naming
+# subjects; it never creates a hand-off and carries no inputs — a run chooses
+# WHICH, never WHAT. Anything else is refused as `handoff_refused:<rule>` and
+# recorded, and a refused request has no effect on what the ASOP declared:
+# never repaired, never silently dropped, never able to cancel a filing.
 # =============================================================================
 
 $id: https://raw.githubusercontent.com/mabidoli/asop/main/schema/v1/filing-request.yaml
@@ -20,24 +21,19 @@ properties:
   handoff:
     description: The id of a hand-off the filing ASOP declares.
     type: string
-    minLength: 1
-    pattern: '\S'
+    pattern: '^\S(.*\S)?$'
   to:
     description: The asop_id that hand-off targets. Must match it.
     type: string
-    minLength: 1
-    pattern: '\S'
+    pattern: '^\S(.*\S)?$'
   subject:
     description: >-
       On a `many` hand-off, one subject its `subject_from` yields. Forbidden
       on a `one` hand-off, whose subject is the chain.
-    type: [string, integer]
-  inputs:
-    description: >-
-      Successor inputs the declaration does not map. A value for an input the
-      declaration maps is refused, even when equal-looking — a run does not
-      get to override its procedure.
-    type: object
+    oneOf:
+      - type: string
+        pattern: '^\S(.*\S)?$'
+      - type: integer
   reason:
     description: Why, in the run's words. Recorded with the filing.
     type: string

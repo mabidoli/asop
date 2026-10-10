@@ -192,7 +192,7 @@ properties:
     minItems: 1
     uniqueItems: true
     items:
-      $ref: '#/$defs/nonBlankString'
+      $ref: '#/$defs/exactName'
     description: >-
       The closed set of outcomes a run of this procedure can finish with.
       Declared so that a hand-off's `on_outcomes` is checked where it is
@@ -208,9 +208,9 @@ properties:
       required: [name]
       properties:
         name:
-          $ref: '#/$defs/nonBlankString'
+          $ref: '#/$defs/exactName'
         description:
-          $ref: '#/$defs/nonBlankString'
+          $ref: '#/$defs/exactName'
         kind:
           # Reserved and unvalidated, exactly as on inputs (§11.5).
           true
@@ -226,9 +226,11 @@ properties:
     items:
       $ref: '#/$defs/handoff'
     description: >-
-      Where a finished run MAY file next. Declared on the predecessor; fired
-      by the engine when the run completes with an outcome in `on_outcomes`;
-      refused (`handoff_refused:<rule>`) when a run asks for anything else.
+      Where a finished run MAY file next, and exactly what each successor is
+      handed. Declared on the predecessor; fired by the engine when the run
+      completes with an outcome in `on_outcomes`. A run may narrow a fan-out
+      by naming subjects; anything else it asks for is refused
+      (`handoff_refused:<rule>`) and has no effect on what was declared.
 
   on_escalate:
     type: object
@@ -255,13 +257,13 @@ properties:
           required: [kind, asop_id]
           properties:
             kind: {enum: [run_done, all_runs_done]}
-            asop_id: {$ref: '#/$defs/nonBlankString'}
+            asop_id: {$ref: '#/$defs/exactName'}
         - type: object
           additionalProperties: false
           required: [kind, artefact]
           properties:
             kind: {const: human_approved}
-            artefact: {$ref: '#/$defs/nonBlankString'}
+            artefact: {$ref: '#/$defs/exactName'}
     description: >-
       When a filed run may START. Declared on the successor — the only
       procedure that sees every predecessor — and evaluated within one chain.
@@ -328,8 +330,14 @@ x-asop-cross-checks:
     - {check: "a target carries exactly one of `version` and `versions`; `versions` is '>=N' or '>=N,<M'", refusal: "sop_refused"}
     - {check: "no hand-off, escalation or `requires` names the record's own asop_id", refusal: "sop_refused"}
     - {check: "an `on_escalate` reads no `$run.outputs`", refusal: "sop_refused"}
-    - {check: "at activation: every hand-off target resolves, declares every input it is handed, and is handed every input it declares", refusal: "sop_refused"}
+    - {check: "at activation: every hand-off target resolves and is handed exactly the inputs it declares (a run cannot fill a gap — requests carry no inputs)", refusal: "sop_refused"}
     - {check: "at activation: an `on_escalate` target has a step whose role is human", refusal: "sop_refused"}
+    - {check: "a `versions` range '>=N,<M' has M > N", refusal: "sop_refused"}
+    - {check: "`outputs` names are unique; `outcomes` and `on_outcomes` entries are unique", refusal: "sop_refused"}
+    - {check: "at most one hand-off per target asop_id", refusal: "sop_refused"}
+    - {check: "`$subject.<field>` names one key (no dots); `subject_from.array` is dot-separated keys", refusal: "sop_refused"}
+    - {check: "names (ids, input keys, where keys, outcomes, outputs, artefacts) carry no surrounding whitespace", refusal: "sop_refused"}
+    - {check: "at activation: the hand-off graph reachable through hand-offs and escalations has no cycle", refusal: "sop_refused"}
     - {check: "at filing: every hand-off decision matches handoff.yaml's rules", refusal: "handoff_refused:<rule>"}
 
 $defs:
@@ -338,11 +346,13 @@ $defs:
     additionalProperties: false
     required: [asop_id]
     properties:
-      asop_id: {$ref: '#/$defs/nonBlankString'}
+      asop_id: {$ref: '#/$defs/exactName'}
       version: {type: integer, minimum: 1}
       versions:
         type: string
-        pattern: '^\s*>=\s*[0-9]+\s*(,\s*<\s*[0-9]+\s*)?$'
+        # ASCII digits, no spaces, N >= 1. M > N is a cross-check (below):
+        # a pattern cannot compare two numbers.
+        pattern: '^>=[1-9][0-9]*(,<[1-9][0-9]*)?$'
     oneOf:
       - required: [version]
       - required: [versions]
@@ -351,9 +361,15 @@ $defs:
       Either way the filed run pins one version — outcomes still attach to a
       version, never to a range.
 
+  exactName:
+    # A name matched exactly: non-blank, no surrounding whitespace. Refused
+    # rather than stripped — stripping is how `a` and ` a` collide.
+    type: string
+    pattern: '^\S(.*\S)?$'
+
   inputMap:
     type: object
-    propertyNames: {$ref: '#/$defs/nonBlankString'}
+    propertyNames: {$ref: '#/$defs/exactName'}
     additionalProperties:
       type: [string, number, boolean]
     description: >-
@@ -373,7 +389,7 @@ $defs:
       on_outcomes:
         type: array
         minItems: 1
-        items: {$ref: '#/$defs/nonBlankString'}
+        items: {$ref: '#/$defs/exactName'}
       cardinality:
         enum: [one, many]
         default: one
@@ -382,9 +398,9 @@ $defs:
         additionalProperties: false
         required: [output, array, id_field]
         properties:
-          output: {$ref: '#/$defs/nonBlankString'}
-          array: {$ref: '#/$defs/nonBlankString'}
-          id_field: {$ref: '#/$defs/nonBlankString'}
+          output: {$ref: '#/$defs/exactName'}
+          array: {$ref: '#/$defs/exactName'}
+          id_field: {$ref: '#/$defs/exactName'}
           where:
             type: object
             minProperties: 1
