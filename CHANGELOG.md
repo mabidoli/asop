@@ -4,6 +4,23 @@ Version history for the ASOP specification. The specification itself is
 [`ASOP.md`](ASOP.md); this file is where it has been, so the specification can be
 about what it is.
 
+## asop-spec 0.4.1 — 2026-10-10
+
+### `common_mistakes` holds five, not three
+
+The reference implementation's cap on a step's `common_mistakes` rises from 3 to 5
+(`MAX_COMMON_MISTAKES`), at both the v3 step and the flat-field validator. The first real
+coding-domain execution of a chained library — ten procedures over a multi-epic legacy
+modernization — produced steps with more measured failure modes, each traced to an
+origin, than three slots held; authors were dropping real ones to fit. It is still a cap
+and still a ranking: an unbounded list is a wiki page, and a wiki page is not read at
+handoff time.
+
+The specification text is unchanged — ASOP.md and the schema never stated the number —
+so this is a package release, not a spec version. Relaxing a bound refuses nothing that
+was accepted before. A test now pins the number, so a future change to it fails a test
+rather than drifting.
+
 ## v3.4 — 2026-09-10
 
 ### The standalone store may be an embedded plane, and a run has one owner

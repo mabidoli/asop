@@ -96,6 +96,17 @@ def test_after_is_sorted_and_deduplicated():
     assert out["after"] == [1, 3]
 
 
+def test_a_step_holds_five_common_mistakes_and_refuses_a_sixth():
+    from asop.sop import MAX_COMMON_MISTAKES
+    five = [f"m{i}" for i in range(MAX_COMMON_MISTAKES)]
+    out = validate_step({"name": "x", "role": "r", "purpose": "p", "gate": DET, "common_mistakes": five}, index=1)
+    assert out["common_mistakes"] == five
+    with pytest.raises(SopContractError) as exc:
+        validate_step({"name": "x", "role": "r", "purpose": "p", "gate": DET,
+                       "common_mistakes": five + ["m5"]}, index=1)
+    assert f"the cap is {MAX_COMMON_MISTAKES}" in str(exc.value)
+
+
 # ------------------------------------------------------------------ bounds
 
 def test_more_than_seven_steps_is_refused():

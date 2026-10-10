@@ -43,9 +43,17 @@ def test_an_empty_common_mistakes_list_is_refused():
 
 
 def test_common_mistakes_is_capped():
+    over = [f"m{i}" for i in range(MAX_COMMON_MISTAKES + 1)]
     with pytest.raises(SopContractError) as exc:
-        validate_fields({"purpose": "x", "common_mistakes": ["a", "b", "c", "d"]})
+        validate_fields({"purpose": "x", "common_mistakes": over})
     assert f"cap is {MAX_COMMON_MISTAKES}" in str(exc.value)
+
+
+def test_the_cap_is_five_and_five_are_accepted():
+    # Pinned on purpose: the number is part of the contract other
+    # implementations mirror, so changing it should fail a test, not drift.
+    assert MAX_COMMON_MISTAKES == 5
+    validate_fields({"purpose": "x", "common_mistakes": ["a", "b", "c", "d", "e"]})
 
 
 def test_a_malformed_common_mistakes_is_refused_rather_than_repaired():

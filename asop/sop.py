@@ -47,7 +47,13 @@ from typing import Optional
 # The cap IS the discipline. An unbounded list of known failure modes is a
 # wiki page, and a wiki page is not read at handoff time. Keep the ones that
 # actually bite.
-MAX_COMMON_MISTAKES = 3
+#
+# Why 5 (was 3): the first real coding-domain execution of a chained library
+# — ten procedures over a multi-epic legacy modernization — produced steps
+# with more measured failure modes, each traced to an origin, than three
+# slots could hold, so authors were dropping real ones to fit. Still a cap,
+# still a ranking; not a licence to list everything.
+MAX_COMMON_MISTAKES = 5
 
 # Order matters: this is the order a procedure is READ in, from "may I
 # start" through to "where does the result go". The three added after the
