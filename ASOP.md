@@ -431,11 +431,15 @@ question never needs the wider graph.
   empty fan-out is a finished one; a join waiting for runs that will never exist is a
   deadlock. Once ready, it is filed like any hand-off: its target resolves **then**, and
   its inputs read the parent run's inputs and outputs.
-- **Blocked** when a refusal of one of its `after` hand-offs left a target unfiled, or
-  one of their runs ended without done. A refusal is never an empty result, and a
+- **Blocked** when a refusal of one of its `after` hand-offs left a target unfiled, when
+  an undeclared outcome did (it leaves every target unfiled), or when one of their runs
+  ended without done. A refusal is never an empty result, and a
   failed run is never a finished one. The engine surfaces a blocked join to a person.
   It clears when the failed run is re-run to done under its own key, or when the parent
   is re-attempted, which files the fan-out afresh. A refused **request** blocks nothing.
+- **A re-attempt retires the old joins.** When a parent is re-attempted, the waiting joins
+  of its earlier attempts are never filed. Otherwise a slow run of the stale fan-out
+  would file a join after the fresh one.
 
 What a join gives up: one procedure cannot wait on runs that two unrelated branches
 filed unless both pass through a single fan-out with a join. That is deliberate. "Has
@@ -495,7 +499,9 @@ flow:
 - **Recording.** Every hand-off decision is ledgered with its parent run: filed,
   duplicate, waiting or refused, with each refusal's `toward`. A join's state is
   computed from that record, which is what keeps it from reading a refusal as an empty
-  result.
+  result. A filed join is also ledgered with the natural keys it waited on. Its inputs
+  come from the parent, so this is the only lineage that shows it depends on those runs,
+  and staleness needs it.
 - **Re-evaluating** waiting joins and `requires` whenever a run in the chain finishes.
 - **Liveness.** A blocked join, or a run whose `requires` have not held within the
   engine's bound, is surfaced to a person. The bound is engine configuration.

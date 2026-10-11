@@ -902,7 +902,8 @@ def join_state(after: Iterable[str], *, decisions: Iterable[Mapping], done: Iter
     parent — is not part of it, however the graph moves.
 
     - `blocked` when a refusal of one of those hand-offs left a target unfiled
-      (`toward` non-empty), or one of its runs ended without done. A refusal
+      (`toward` non-empty), when a run-level refusal (an undeclared outcome)
+      did, or when one of its runs ended without done. A refusal
       is never an empty result. The engine surfaces a blocked join to a
       person; it clears by re-running the failed run to done under its own
       key, or by re-attempting the parent, which files afresh.
@@ -911,13 +912,19 @@ def join_state(after: Iterable[str], *, decisions: Iterable[Mapping], done: Iter
     - `ready` otherwise — INCLUDING when the hand-offs filed nothing. An
       empty fan-out is a finished one; a join waiting for runs that will never
       exist is a deadlock.
-    A refused REQUEST (`toward` empty) blocks nothing."""
+    A refused REQUEST (`toward` empty) blocks nothing.
+
+    `decisions` are ONE attempt's. When the parent is re-attempted, the engine
+    retires the waiting joins of its earlier attempts: they are never filed,
+    or a stale fan-out would file a join after the fresh one (§3.7)."""
     after = set(after)
     keys: list[str] = []
     waiting: set[str] = set()
-    settled: set[str] = set()
+    filed_ids: set[str] = set()
     for d in decisions:
         hid = d.get("handoff")
+        if hid is None and d.get("action") == "refuse" and d.get("toward"):
+            return "blocked"  # a run-level refusal (an undeclared outcome) left every target unfiled
         if hid not in after:
             continue
         action = d.get("action")
@@ -927,12 +934,12 @@ def join_state(after: Iterable[str], *, decisions: Iterable[Mapping], done: Iter
             if d.get("toward"):
                 return "blocked"
         elif action in ("file", "duplicate"):
-            settled.add(hid)
+            filed_ids.add(hid)
             keys.append(d["natural_key"])
     done, failed = set(done), set(failed)
     if any(k in failed and k not in done for k in keys):
         return "blocked"
-    if waiting - settled or not all(k in done for k in keys):
+    if waiting - filed_ids or not all(k in done for k in keys):
         return "wait"
     return "ready"
 

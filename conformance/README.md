@@ -16,12 +16,12 @@ A document and the outcome a conforming implementation must reach. Nothing else.
   because: "a human gate nobody is named on is a gate nobody answers"
 ```
 
-`asserts` cites [`assertions.yaml`](assertions.yaml) — the 133 normative rules
+`asserts` cites [`assertions.yaml`](assertions.yaml) — the 134 normative rules
 extracted from the specification — so a rule with no vector is visibly untested
 rather than quietly untested.
 
 > **These counts are facts about the files, and they went stale once.** They read
-> 107/8/39 while the files said 109/10/61 (now 133/32/136, v3.5), which is worse than having no numbers:
+> 107/8/39 while the files said 109/10/61 (now 134/33/140, v3.5), which is worse than having no numbers:
 > a reader cross-checking a coverage claim against this README would have found a
 > mismatch and concluded the claim was wrong. Recount before trusting:
 >
@@ -73,15 +73,15 @@ Stated here because a suite that hides its own coverage is worse than a small on
   convention rather than contract, and pinning it would make the suite a stricter
   opinion than the standard. The cost is that two conforming implementations may
   return different shapes for the same input.
-- **A pattern-matcher could still pass.** With 136 vectors, an implementation that
+- **A pattern-matcher could still pass.** With 140 vectors, an implementation that
   recognises these specific documents rather than implementing the rules would
   score full marks. Commands are varied across vectors to make that less
   comfortable, but the real answer is more vectors, and the honest statement is
   that passing proves the rules exercised here and nothing beyond them.
 - **Only refusal codes are compared, not messages.** Two implementations may
   refuse the same document for different stated reasons.
-- **32 of the 133 assertions are cited by a vector** (10 before v3.5; 22 of the 24
-  hand-off assertions, A110–A133, are cited, and A130 and A132 need a resolver). The
+- **33 of the 134 assertions are cited by a vector** (10 before v3.5; 23 of the 25
+  hand-off assertions, A110–A134, are cited, and A130 and A132 need a resolver). The
   other 101 are all `testable: true`. 88 of them need artifact types the runner does not have yet —
   an `asop` record, a `step`, a `revision` changeset — so the honest number for
   what is coverable today is smaller than the gap looks.

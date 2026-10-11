@@ -129,3 +129,26 @@ vectors:
     decisions: [{action: refuse, code: "handoff_refused:subject", handoff: merge, request: 0, toward: []}, {action: wait, handoff: merge}]
     state: wait
     because: "a refused REQUEST naming the earlier join is not that join being filed; it still has to be filed and finish"
+
+  - id: jn-undeclared-outcome-blocks
+    asserts: [A131]
+    after: [each]
+    decisions: [{action: refuse, code: "handoff_refused:outcome", toward: [consolidate, extract]}]
+    state: blocked
+    because: "an undeclared outcome is a run-level refusal that left every target unfiled; an engine asking about the join must hear blocked, never ready"
+
+  - id: jn-other-handoffs-refusal-does-not-block
+    asserts: [A131]
+    after: [each]
+    decisions: [*s1, *s2, {action: refuse, code: "handoff_refused:version", handoff: notify, toward: [notify]}]
+    done: ["R1|extract|s1|a1", "R1|extract|s2|a1"]
+    state: ready
+    because: "blocking is scoped to the join's own `after` hand-offs; another hand-off's refusal is that hand-off's problem"
+
+  - id: jn-duplicate-files-a-listed-join
+    asserts: [A124]
+    after: [merge]
+    decisions: [{action: wait, handoff: merge}, {action: duplicate, handoff: merge, natural_key: "R1|consolidate|R1|a1"}]
+    done: ["R1|consolidate|R1|a1"]
+    state: ready
+    because: "on a replayed ledger the earlier join comes back as a duplicate; treating only `file` as filed would deadlock the next join silently"

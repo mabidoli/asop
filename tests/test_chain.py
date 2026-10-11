@@ -718,7 +718,7 @@ def test_a_join_after_a_join_waits_until_the_first_is_filed_and_done():
 
 
 def test_a_request_naming_a_join_subject_does_not_unblock_a_waiting_join():
-    # a refused request on a join must not count as the join having been settled
+    # a refused request on a join must not count as the join having been filed
     d = plan_intake(requests=[{"schema": FILING_REQUEST_SCHEMA, "handoff": "consolidate", "to": "consolidate",
                                "subject": "s1"}])
     assert "handoff_refused:subject" in refused(d)

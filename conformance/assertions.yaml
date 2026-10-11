@@ -699,7 +699,7 @@
   testable: true
   violation: "A negative verdict or nonzero exit status releases dependents."
 #
-# NEW RULES, 2026-10-10 — hand-offs (§3.7, v3.5). Extracted as A110-A133 from
+# NEW RULES, 2026-10-10 — hand-offs (§3.7, v3.5). Extracted as A110-A134 from
 # the section that reverses §11.4: what a finished run may file next is
 # declared on the ASOP, and an engine refuses anything not declared. The
 # vocabulary for `applies_to` gains `handoff` (a filing decision), `join` (may
@@ -708,7 +708,7 @@
 # implementation can get one right and another wrong.
 #
 # Before release, A124, A125, A131 and A132 were rewritten and A133 added:
-# joins moved from the waiting procedure (`all_runs_done`, "settled") to the
+# A134 added: joins moved from the waiting procedure (`all_runs_done`, "settled") to the
 # procedure that fans out (`after`). See CHANGELOG v3.5 for why.
 - id: A110
   section: "3.7"
@@ -832,7 +832,7 @@
   violation: "Two hand-offs to one target share natural keys and one silently becomes a duplicate."
 - id: A130
   section: "3.7"
-  rule: "At activation, the hand-off graph reachable from a record through hand-offs and escalations has no cycle, and every hand-off target is handed exactly the inputs it declares."
+  rule: "At activation, the graph reachable from a record through hand-offs (escalations excluded, A132) has no cycle, and every hand-off target is handed exactly the inputs it declares."
   applies_to: asop
   testable: true
   violation: "A→B→A activates, or a target is left an input no filing can supply."
@@ -850,8 +850,14 @@
   violation: "A decision procedure that re-files the step that escalated is refused as a cycle, or a run waits on one that can exist only after it finishes."
 - id: A133
   section: "3.7"
-  rule: "A hand-off with `after` (a join) is `one`, names only hand-offs declared earlier in the same record and not itself; it is not filed at completion but recorded as waiting, and filed once ready with its target resolved then and its inputs read from the parent run."
+  rule: "A hand-off with `after` (a join) is `one` and names only hand-offs declared earlier in the same record, never itself."
   applies_to: asop
   testable: true
-  violation: "A join fans out, waits on a hand-off declared after it (or itself), or is filed at completion before its runs are finished."
+  violation: "A join fans out, or waits on a hand-off declared after it (or itself)."
+- id: A134
+  section: "3.7"
+  rule: "A join that fires is not filed at completion but recorded as waiting; once ready it files one run whose subject is the chain, its target resolved then and its inputs read from the parent run. A parent's re-attempt retires the waiting joins of its earlier attempts."
+  applies_to: handoff
+  testable: true
+  violation: "A join is filed before its runs are finished, against the version active at completion, or from a superseded attempt's fan-out."
 

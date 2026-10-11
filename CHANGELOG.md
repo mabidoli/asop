@@ -150,6 +150,10 @@ release. The three cases are now defined behaviour or impossible:
   chain run with different inputs are refused as `conflict`, and recorded;
 - a join no longer depends on the graph.
 
+A fourth review, of the redesign, found no blocker. It found that an undeclared outcome
+did not block a join when asked directly, that a superseded attempt's join could still
+be filed, and two join rules no vector pinned. All are fixed, with vectors.
+
 **Compatibility.** Additive for records: every v3.4 record is a valid v3.5 record. It is
 not additive for readers. The schema is closed, so a v3.4 reader refuses a record with
 hand-offs. That is deliberate: dropping hand-offs it did not understand would turn the
@@ -167,8 +171,8 @@ procedure into a dead end. Adopt 0.5.0 before accepting chained records.
   self-reference.
 - Conformance:
   - four new vector files, `chain-record.yaml` (asop), `handoff.yaml`, `join.yaml` and
-    `requires.yaml`, with 75 vectors, for 136 in all;
-  - 24 new assertions, A110–A133, of which 22 are cited by a vector. A130 and A132 need
+    `requires.yaml`, with 79 vectors, for 140 in all;
+  - 25 new assertions, A110–A134, of which 23 are cited by a vector. A130 and A132 need
     a resolver, so the Python tests cover them;
   - the reference runner learns four artifact kinds.
 - Found while cross-checking, and predating this release: `validate_gate`'s normalised

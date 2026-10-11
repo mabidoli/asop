@@ -54,6 +54,15 @@ library:
       inputs: [{name: root}]
       roles: {worker: {kind: agent}}
       steps: [{name: index, role: worker, purpose: index it, gate: {kind: deterministic, check: make index}}]
+  sweep:
+    1:
+      title: Sweep the chain
+      inputs: [{name: root}]
+      roles: {worker: {kind: agent}}
+      steps: [{name: sweep, role: worker, purpose: sweep it, gate: {kind: deterministic, check: make sweep}}]
+      handoffs:
+        - {id: index, to: {asop_id: index, version: 1}, inputs: {root: $run.inputs.root}}
+        - {id: report, to: {asop_id: gone, versions: ">=1"}, after: [index], inputs: {root: $run.inputs.root}}
   consolidate:
     1:
       title: Consolidate
@@ -244,7 +253,7 @@ vectors:
     because: "the same run already filed with different inputs; which inputs it gets must not depend on who finished first"
 
   - id: ho-request-cannot-choose-join-subject
-    asserts: [A119, A133]
+    asserts: [A119, A134]
     filer: intake
     outcome: FETCHED
     outputs: *sources
@@ -254,7 +263,7 @@ vectors:
     because: "a join is `one`: its subject is the chain. The request is refused at the join's place in declaration order, and the join still waits"
 
   - id: ho-join-not-on-this-outcome
-    asserts: [A117, A133]
+    asserts: [A117, A134]
     filer: intake
     outcome: BLOCKED
     outputs: *sources
@@ -264,7 +273,7 @@ vectors:
     because: "a join fires on its own on_outcomes like any hand-off; BLOCKED fires neither the fan-out nor the join"
 
   - id: ho-join-files-when-ready
-    asserts: [A133]
+    asserts: [A134]
     filer: intake
     outcome: FETCHED
     outputs: *sources
@@ -274,7 +283,7 @@ vectors:
     because: "once join_state is ready, the join files ONE run whose subject is the chain, with inputs from the PARENT run"
 
   - id: ho-join-filed-once
-    asserts: [A122, A133]
+    asserts: [A122, A134]
     filer: intake
     outcome: FETCHED
     outputs: *sources
@@ -285,7 +294,7 @@ vectors:
     because: "a replayed join files nothing twice"
 
   - id: ho-join-conflict
-    asserts: [A128, A133]
+    asserts: [A128, A134]
     filer: intake
     outcome: FETCHED
     outputs: *sources
@@ -315,3 +324,11 @@ vectors:
     existing: {"R1|extract|s1|a1": {source_id: s1, root: R1}}
     expect: *both
     because: "re-filing downstream of a stale input is a new attempt, not a duplicate"
+
+  - id: ho-join-target-resolved-when-it-fires
+    asserts: [A121, A134]
+    filer: sweep
+    run_inputs: {root: R1}
+    join: report
+    expect: ["refuse handoff_refused:version -> gone"]
+    because: "a join's target resolves when the join fires, not when the parent finished; no active version in range then is refused, and blocks whatever waits on it"
