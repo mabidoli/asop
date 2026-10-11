@@ -2,9 +2,11 @@
 next, when the filed run may start, and what the engine refuses.
 
 The worked chain is the one the spec uses: `intake` fans out one `extract` per
-source; every `extract` hands off to one `consolidate` (a join); `consolidate`
-hands to `plan`, which waits for a person's approval; `plan` fans out one build
-per task, routed by the task's kind; procedures escalate to `decide`, which a
+source, files one `conventions` run, and joins its fan-out into one
+`consolidate` (a hand-off with `after`); every `extract` hands one `index` run
+to the chain; `consolidate` hands to `plan`, which waits for `conventions` and a
+person's approval; `plan` fans out one build per task, routed by the task's
+kind, and joins them into `close`; procedures escalate to `decide`, which a
 person takes part in."""
 
 from __future__ import annotations
@@ -20,7 +22,8 @@ from asop.chain import (
     parse_version_range,
     plan_escalation,
     plan_handoffs,
-    predecessors_of,
+    plan_join,
+    join_state,
     requires_satisfied,
     validate_filing_request,
     validate_handoff_targets,
@@ -59,26 +62,39 @@ INTAKE = body(
         "subject_from": {"output": "sources", "array": "sources", "id_field": "id",
                          "where": {"kind": ["spec", "feature"]}, "where_not": {"removed": True}},
         "inputs": {"source_id": "$subject", "title": "$subject.title", "root": "$run.inputs.root"},
+    }, {
+        "id": "conventions",
+        "to": {"asop_id": "conventions", "version": 1},
+        "on_outcomes": ["FETCHED", "NOTHING_TO_FETCH"],
+        "inputs": {"root": "$run.inputs.root"},
+    }, {
+        "id": "consolidate",
+        "to": {"asop_id": "consolidate", "version": 1},
+        "on_outcomes": ["FETCHED", "NOTHING_TO_FETCH"],
+        "after": ["extract-each-source"],
+        "inputs": {"root": "$run.inputs.root"},
     }],
     on_escalate=ESCALATE,
 )
 EXTRACT = body(
     "Extract requirements from one source",
     inputs=["source_id", "title", "root"],
-    handoffs=[{"id": "join", "to": {"asop_id": "consolidate", "version": 1}, "inputs": {"root": "$run.inputs.root"}}],
+    handoffs=[{"id": "index", "to": {"asop_id": "index", "version": 1}, "inputs": {"root": "$run.inputs.root"}}],
     on_escalate=ESCALATE,
 )
+INDEX = body("Index the chain", inputs=["root"])
+CONVENTIONS = body("Record the conventions", inputs=["root"])
 CONSOLIDATE = body(
     "Consolidate requirements",
     inputs=["root"],
-    requires=[{"kind": "all_runs_done", "asop_id": "extract"}],
     handoffs=[{"id": "plan", "to": {"asop_id": "plan", "version": 1}, "inputs": {"root": "$run.inputs.root"}}],
 )
+CLOSE = body("Close the epic", inputs=["root"])
 PLAN = body(
     "Plan the work",
     inputs=["root"],
     outputs=[{"name": "tasks"}],
-    requires=[{"kind": "run_done", "asop_id": "consolidate"},
+    requires=[{"kind": "run_done", "asop_id": "conventions"},
               {"kind": "human_approved", "artefact": "research-review"}],
     handoffs=[
         {"id": "build-backend", "to": {"asop_id": "build", "version": 1}, "cardinality": "many",
@@ -87,6 +103,8 @@ PLAN = body(
         {"id": "build-handoff", "to": {"asop_id": "build-handoff", "version": 1}, "cardinality": "many",
          "subject_from": {"output": "tasks", "array": "tasks", "id_field": "id", "where": {"kind": "handoff"}},
          "inputs": {"task_id": "$subject"}},
+        {"id": "close", "to": {"asop_id": "close", "version": 1}, "after": ["build-backend", "build-handoff"],
+         "inputs": {"root": "$run.inputs.root"}},
     ],
 )
 BUILD = body("Build one task", inputs=["task_id"])
@@ -101,6 +119,7 @@ DECIDE = body(
 LIBRARY = {  # asop_id -> {version: body}; the version listed is the ACTIVE one
     "intake": {1: INTAKE}, "extract": {2: EXTRACT}, "consolidate": {1: CONSOLIDATE},
     "plan": {1: PLAN}, "build": {1: BUILD}, "build-handoff": {1: BUILD_HANDOFF}, "decide": {3: DECIDE},
+    "index": {1: INDEX}, "conventions": {1: CONVENTIONS}, "close": {1: CLOSE},
 }
 
 
@@ -141,7 +160,7 @@ def req(**over):
     return r
 
 
-JOIN_REQ = {"schema": FILING_REQUEST_SCHEMA, "handoff": "join", "to": "consolidate"}
+ONE_REQ = {"schema": FILING_REQUEST_SCHEMA, "handoff": "index", "to": "index"}
 
 
 def filed(decisions):
@@ -149,7 +168,8 @@ def filed(decisions):
 
 
 def subjects(decisions):
-    return [d["subject"] for d in filed(decisions)]
+    # intake's one `conventions` run files beside every fan-out; leave it out
+    return [d["subject"] for d in filed(decisions) if d["handoff"] != "conventions"]
 
 
 def refused(decisions):
@@ -200,10 +220,16 @@ def test_on_outcomes_without_declared_outcomes_is_refused():
         v(bad)
 
 
-@pytest.mark.parametrize("kind", ["slot_free", "artefact_current", "no_run_for_subject", "whenever"])
+@pytest.mark.parametrize("kind", ["slot_free", "artefact_current", "no_run_for_subject", "all_runs_done", "whenever"])
 def test_requires_kinds_are_a_closed_list(kind):
     with pytest.raises(SopContractError, match="not (one of|a requires kind)"):
         v(body("x", requires=[{"kind": kind, "asop_id": "y"}]))
+
+
+def test_all_runs_done_points_to_joins():
+    # withdrawn before release; the refusal says where a join goes instead
+    with pytest.raises(SopContractError, match="procedure that fans out"):
+        v(body("x", requires=[{"kind": "all_runs_done", "asop_id": "y"}]))
 
 
 @pytest.mark.parametrize("kind", [["run_done"], {"a": 1}, 7, None])
@@ -341,22 +367,6 @@ def test_a_cycle_through_other_records_is_refused():
         LIBRARY.clear(); LIBRARY.update(saved)
 
 
-def test_predecessors_come_from_handoffs_only():
-    # review N1: counting escalation edges made a join an ancestor of what it waits on
-    preds = predecessors_of({k: v(b, k) for k, vs in LIBRARY.items() for b in vs.values()})
-    assert preds["extract"] == {"intake"}
-    assert preds["consolidate"] == {"extract"}
-    assert "decide" not in preds and "intake" not in preds
-
-
-def test_predecessors_take_every_pinned_version():
-    # review P6: a run pinned to an older version hands off by that version's declarations
-    old = v(body("Old extract", inputs=["root"], handoffs=[
-        {"id": "j", "to": {"asop_id": "legacy-join", "version": 1}, "inputs": {"root": "$run.inputs.root"}}]))
-    preds = predecessors_of([("extract", v(EXTRACT, "extract")), ("extract", old)])
-    assert preds["consolidate"] == {"extract"} and preds["legacy-join"] == {"extract"}
-
-
 def with_library(extra):
     saved = dict(LIBRARY)
     LIBRARY.update({k: {1: b} for k, b in extra.items()})
@@ -380,7 +390,7 @@ def test_a_requires_on_a_transitive_descendant_is_refused():
         {"id": "h", "to": {"asop_id": "build", "version": 1}, "inputs": {"task_id": "$run.inputs.root"}}])})
     try:
         w = v(body("W", handoffs=[{"id": "h", "to": {"asop_id": "mid", "version": 1}, "inputs": {"root": "r"}}],
-                   requires=[{"kind": "all_runs_done", "asop_id": "build"}]), "w")
+                   requires=[{"kind": "run_done", "asop_id": "build"}]), "w")
         with pytest.raises(ChainContractError, match="wait forever"):
             validate_handoff_targets(w, resolve, asop_id="w")
     finally:
@@ -436,7 +446,8 @@ def test_an_undeclared_outcome_is_refused_not_silent(outcome):
 
 
 def test_an_empty_fan_out_files_nothing_and_is_not_an_error():
-    assert plan_intake(outputs={"sources": {"sources": []}}) == []
+    d = plan_intake(outputs={"sources": {"sources": []}})
+    assert subjects(d) == [] and refused(d) == []
 
 
 def test_requests_narrow_a_fan_out():
@@ -479,18 +490,21 @@ def test_requests_that_are_not_a_list_are_refused():
 
 
 def test_a_one_handoff_with_two_requests_refuses_them_and_still_files():
-    d = plan_extract(requests=[JOIN_REQ, JOIN_REQ])
+    d = plan_extract(requests=[ONE_REQ, ONE_REQ])
     assert refused(d) == ["handoff_refused:cardinality"]
     assert subjects(d) == ["R1"]
 
 
 def test_a_one_handoff_may_not_choose_its_subject_but_still_files():
-    d = plan_extract(requests=[{**JOIN_REQ, "subject": "elsewhere"}])
+    d = plan_extract(requests=[{**ONE_REQ, "subject": "elsewhere"}])
     assert refused(d) == ["handoff_refused:subject"]
     assert subjects(d) == ["R1"]
 
 
-def test_a_join_is_filed_once_however_many_predecessors_hand_off():
+def test_a_chain_run_is_filed_once_however_many_predecessors_hand_off():
+    # NOT a join: the run is filed when the FIRST extract finishes. Review
+    # round 3 (B2) showed a per-subject `one` hand-off used as a join either
+    # conflicts for ever or drops inputs; a join is `after`, on the fan-out.
     filed_so_far: dict = {}
     actions = []
     for _ in range(3):  # three extract runs finish
@@ -498,19 +512,19 @@ def test_a_join_is_filed_once_however_many_predecessors_hand_off():
         actions += [x["action"] for x in d]
         filed_so_far.update({x["natural_key"]: x["inputs"] for x in filed(d)})
     assert actions == ["file", "duplicate", "duplicate"]
-    assert set(filed_so_far) == {natural_key("R1", "consolidate", "R1")}
+    assert set(filed_so_far) == {natural_key("R1", "index", "R1")}
 
 
 def test_a_duplicate_with_different_inputs_is_a_conflict():
-    # review H5(c): a join's inputs were whichever predecessor finished first
-    d = plan_extract(existing={"R1|consolidate|R1|a1": {"root": "SOMEWHERE-ELSE"}})
+    # review H5(c): a chain run's inputs were whichever predecessor finished first
+    d = plan_extract(existing={"R1|index|R1|a1": {"root": "SOMEWHERE-ELSE"}})
     assert refused(d) == ["handoff_refused:conflict"]
 
 
 def test_a_replay_files_nothing_twice():
     first = plan_intake()
     again = plan_intake(existing={x["natural_key"]: x["inputs"] for x in filed(first)})
-    assert filed(again) == [] and {x["action"] for x in again} == {"duplicate"}
+    assert filed(again) == [] and {x["action"] for x in again} == {"duplicate", "wait"}
     assert plan_intake(existing=[x["natural_key"] for x in filed(first)])[0]["action"] == "duplicate"
 
 
@@ -518,7 +532,8 @@ def test_a_stale_refile_files_the_next_attempt():
     # review H5(a): attempt was hard-coded to 1, so re-filing on staleness was a duplicate
     first = plan_intake()
     again = plan_intake(existing={x["natural_key"]: x["inputs"] for x in filed(first)}, attempt=2)
-    assert [x["natural_key"] for x in filed(again)] == ["R1|extract|s1|a2", "R1|extract|s2|a2"]
+    assert [x["natural_key"] for x in filed(again)] == ["R1|extract|s1|a2", "R1|extract|s2|a2",
+                                                        "R1|conventions|R1|a2"]
 
 
 def test_a_target_with_no_active_version_in_range_is_refused():
@@ -529,6 +544,7 @@ def test_a_target_with_no_active_version_in_range_is_refused():
     finally:
         LIBRARY["extract"] = saved
     assert refused(d) == ["handoff_refused:version"]
+    assert [x["action"] for x in d] == ["refuse", "file", "wait"]  # conventions still files; the join waits
 
 
 @pytest.mark.parametrize("out", [
@@ -571,6 +587,7 @@ def test_fan_out_routes_by_kind_across_handoffs():
                       requests=[], resolve=resolve, chain="R1")
     assert [(x["to"]["asop_id"], x["subject"]) for x in filed(d)] == [
         ("build", "t1"), ("build", "t3"), ("build-handoff", "t2")]
+    assert d[-1] == {"action": "wait", "handoff": "close", "after": ["build-backend", "build-handoff"]}
 
 
 def test_a_literal_dollar_is_escaped():
@@ -614,98 +631,211 @@ def test_no_on_escalate_means_the_gate_escalation_applies():
     assert plan_escalation(v(BUILD), subject="s", run_inputs={}, context={}, resolve=resolve, chain="C") is None
 
 
-# ------------------------------------------------------------------ starting
+# ------------------------------------------------------------------ joins
 
-PREDS = {"extract": {"intake"}, "consolidate": {"extract"}}
-
-
-def run(a, s, n=1, done=True, processed=None, refused_toward=()):
-    return {"asop_id": a, "subject": s, "attempt": n, "done": done,
-            "processed": done if processed is None else processed, "refused_toward": list(refused_toward)}
+def keys(decisions, handoff="extract-each-source"):
+    return [d["natural_key"] for d in decisions if d.get("handoff") == handoff and d["action"] in ("file", "duplicate")]
 
 
-JOIN = [{"kind": "all_runs_done", "asop_id": "extract"}]
+AFTER = ["extract-each-source"]
 
 
-def ok(reqs, *runs_, approved=()):
-    return requires_satisfied(reqs, runs=list(runs_), predecessors=PREDS, approved=approved)
+def test_a_join_is_recorded_waiting_not_filed_at_completion():
+    d = plan_intake()
+    assert {"action": "wait", "handoff": "consolidate", "after": AFTER} in d
+    assert not [x for x in filed(d) if x["to"]["asop_id"] == "consolidate"]
 
 
-def test_a_join_waits_for_every_filed_run():
-    assert not ok(JOIN, run("intake", "R1"), run("extract", "s1"), run("extract", "s2", done=False))
-    assert ok(JOIN, run("intake", "R1"), run("extract", "s1"), run("extract", "s2"))
+def test_a_join_waits_for_every_run_its_fan_out_filed():
+    # review H3 / round 3: the first finisher must not fire the join
+    d = plan_intake()
+    s1, s2 = keys(d)
+    assert join_state(AFTER, decisions=d) == "wait"
+    assert join_state(AFTER, decisions=d, done=[s1]) == "wait"
+    assert join_state(AFTER, decisions=d, done=[s1, s2]) == "ready"
 
 
-def test_a_join_waits_until_its_predecessor_has_been_processed():
-    # review H3: the first processed fan-out marked the join complete
-    assert not ok(JOIN, run("intake", "R1", processed=False))
-    assert not ok(JOIN, run("intake", "R1", done=False), run("extract", "s1"))
-
-
-def test_an_empty_fan_out_satisfies_its_join():
-    # The deadlock this rule exists to prevent.
-    assert ok(JOIN, run("intake", "R1"))
+def test_an_empty_fan_out_makes_its_join_ready():
+    # the deadlock this rule exists to prevent
+    d = plan_intake(outputs={"sources": {"sources": []}}, outcome="NOTHING_TO_FETCH")
+    assert join_state(AFTER, decisions=d) == "ready"
 
 
 def test_a_refused_fan_out_blocks_its_join_instead_of_reading_as_empty():
-    # review H3: a refused fan-out (bad output, no version) is a blocker for a person
-    assert not ok(JOIN, run("intake", "R1", refused_toward=["extract"]))
+    for d in (plan_intake(outputs={"sources": {"items": []}}),        # output
+              plan_intake(outputs={"sources": {"sources": [{"id": "s1", "kind": "spec", "title": {"x": 1}}]}})):  # inputs
+        assert join_state(AFTER, decisions=d, done=keys(d)) == "blocked"
 
 
-def test_a_refusal_upstream_blocks_a_join_further_down():
-    assert not ok([{"kind": "run_done", "asop_id": "consolidate"}],
-                  run("intake", "R1", refused_toward=["extract"]), run("extract", "s1"), run("consolidate", "R1"))
+def test_a_refused_request_does_not_block_the_join():
+    d = plan_intake(requests=[req(subject="nope")])
+    assert join_state(AFTER, decisions=d, done=keys(d)) == "ready"
 
 
-def test_a_branch_never_taken_blocks_nothing():
-    # review P2: the predecessor's outcome closed the branch — no runs, nothing to wait for
-    assert ok(JOIN, run("intake", "R1"))  # processed, filed nothing toward extract
-    assert ok([{"kind": "all_runs_done", "asop_id": "consolidate"}])  # nothing upstream ever ran
+def test_a_failed_run_blocks_and_a_rerun_to_done_clears_it():
+    d = plan_intake()
+    s1, s2 = keys(d)
+    assert join_state(AFTER, decisions=d, done=[s1], failed=[s2]) == "blocked"
+    assert join_state(AFTER, decisions=d, done=[s1, s2], failed=[s2]) == "ready"
+
+
+def test_runs_filed_by_other_paths_are_not_waited_on():
+    # review round 3 (B1): an escalation's decision re-filing extract must not
+    # reopen (or be needed by) a join it is not part of
+    d = plan_intake()
+    elsewhere = natural_key("R1", "extract", "s9")
+    assert join_state(AFTER, decisions=d, done=keys(d)) == "ready"
+    assert join_state(AFTER, decisions=d + [{"action": "file", "handoff": "conventions",
+                                              "natural_key": natural_key("R1", "conventions", "R1")}],
+                      done=keys(d), failed=[elsewhere]) == "ready"
+
+
+def test_a_duplicate_the_fan_out_relies_on_is_waited_on():
+    first = plan_intake()
+    again = plan_intake(existing={x["natural_key"]: x["inputs"] for x in filed(first)})
+    assert join_state(AFTER, decisions=again) == "wait"
+    assert join_state(AFTER, decisions=again, done=keys(first)) == "ready"
+
+
+def test_a_join_over_two_fan_outs_waits_for_both():
+    tasks = {"tasks": [{"id": "t1", "kind": "backend"}, {"id": "t2", "kind": "handoff"}]}
+    d = plan_handoffs(v(PLAN, "plan"), outcome=None, outputs={"tasks": tasks}, run_inputs={"root": "R1"},
+                      requests=[], resolve=resolve, chain="R1")
+    after = ["build-backend", "build-handoff"]
+    (b1,), (h1,) = keys(d, "build-backend"), keys(d, "build-handoff")
+    assert join_state(after, decisions=d, done=[b1]) == "wait"
+    assert join_state(after, decisions=d, done=[b1, h1]) == "ready"
+
+
+def test_a_join_after_a_join_waits_until_the_first_is_filed_and_done():
+    first = {"action": "wait", "handoff": "merge", "after": AFTER}
+    filed_join = {"action": "file", "handoff": "merge", "natural_key": "R1|consolidate|R1|a1"}
+    assert join_state(["merge"], decisions=[first]) == "wait"
+    assert join_state(["merge"], decisions=[first, filed_join]) == "wait"
+    assert join_state(["merge"], decisions=[first, filed_join], done=["R1|consolidate|R1|a1"]) == "ready"
+    refused_join = {"action": "refuse", "handoff": "merge", "code": "handoff_refused:conflict", "toward": ["consolidate"]}
+    assert join_state(["merge"], decisions=[first, refused_join]) == "blocked"
+
+
+def test_a_request_naming_a_join_subject_does_not_unblock_a_waiting_join():
+    # a refused request on a join must not count as the join having been settled
+    d = plan_intake(requests=[{"schema": FILING_REQUEST_SCHEMA, "handoff": "consolidate", "to": "consolidate",
+                               "subject": "s1"}])
+    assert "handoff_refused:subject" in refused(d)
+    assert join_state(["consolidate"], decisions=d) == "wait"
+
+
+def plan_consolidate(outcome="FETCHED", existing=()):
+    return plan_join(v(INTAKE, "intake"), "consolidate", outcome=outcome, outputs={"sources": SOURCES},
+                     run_inputs={"root": "R1"}, resolve=resolve, chain="R1", existing=existing)
+
+
+def test_a_ready_join_files_one_chain_run_with_the_parents_inputs():
+    assert plan_consolidate() == [{
+        "action": "file", "handoff": "consolidate", "to": {"asop_id": "consolidate", "version": 1},
+        "subject": "R1", "inputs": {"root": "R1"}, "natural_key": "R1|consolidate|R1|a1"}]
+
+
+def test_a_join_filed_twice_is_a_duplicate_and_with_other_inputs_a_conflict():
+    assert [x["action"] for x in plan_consolidate(existing={"R1|consolidate|R1|a1": {"root": "R1"}})] == ["duplicate"]
+    assert refused(plan_consolidate(existing={"R1|consolidate|R1|a1": {"root": "X"}})) == ["handoff_refused:conflict"]
+
+
+def test_a_join_resolves_its_target_when_it_fires():
+    # review round 3 (B3): nothing about a join is fixed by the graph at completion
+    saved = LIBRARY["consolidate"]
+    LIBRARY["consolidate"] = {}
+    try:
+        assert refused(plan_consolidate()) == ["handoff_refused:version"]
+    finally:
+        LIBRARY["consolidate"] = saved
+
+
+def test_a_join_not_fired_by_the_outcome_files_nothing():
+    assert plan_consolidate(outcome="BLOCKED") == []
+    assert plan_consolidate(outcome="OKAY") == []
+
+
+def test_plan_join_refuses_what_is_not_a_join():
+    with pytest.raises(ChainContractError, match="not a join"):
+        plan_join(v(INTAKE, "intake"), "extract-each-source", outcome="FETCHED", outputs={}, run_inputs={},
+                  resolve=resolve, chain="R1")
+
+
+@pytest.mark.parametrize("handoffs,match", [
+    ([{"id": "j", "to": {"asop_id": "b", "version": 1}, "after": ["h"]},
+      {"id": "h", "to": {"asop_id": "a", "version": 1}}], "declared EARLIER"),
+    ([{"id": "j", "to": {"asop_id": "b", "version": 1}, "after": ["j"]}], "names itself"),
+    ([{"id": "h", "to": {"asop_id": "a", "version": 1}},
+      {"id": "j", "to": {"asop_id": "b", "version": 1}, "after": ["h", "h"]}], "twice"),
+    ([{"id": "h", "to": {"asop_id": "a", "version": 1}},
+      {"id": "j", "to": {"asop_id": "b", "version": 1}, "after": "h"}], "LIST"),
+    ([{"id": "h", "to": {"asop_id": "a", "version": 1}},
+      {"id": "j", "to": {"asop_id": "b", "version": 1}, "after": []}], "LIST"),
+    ([{"id": "h", "to": {"asop_id": "a", "version": 1}},
+      {"id": "j", "to": {"asop_id": "b", "version": 1}, "cardinality": "many", "after": ["h"],
+       "subject_from": {"output": "o", "array": "a", "id_field": "id"}}], "Make it `one`"),
+])
+def test_a_join_names_earlier_handoffs_and_is_one(handoffs, match):
+    with pytest.raises(SopContractError, match=match):
+        v(body("x", outputs=[{"name": "o"}], handoffs=handoffs))
+
+
+# ------------------------------------------------------------------ starting
+
+def run(a, s, n=1, done=True):
+    return {"asop_id": a, "subject": s, "attempt": n, "done": done}
+
+
+CONV = [{"kind": "run_done", "asop_id": "conventions"}]
+
+
+def ok(reqs, *runs_, approved=(), chain="R1"):
+    return requires_satisfied(reqs, chain=chain, runs=list(runs_), approved=approved)
+
+
+def test_run_done_is_the_chain_run():
+    assert not ok(CONV)
+    assert not ok(CONV, run("conventions", "R1", done=False))
+    assert ok(CONV, run("conventions", "R1"))
+
+
+def test_per_subject_runs_never_satisfy_run_done():
+    # waiting on a fan-out is a join, declared on the procedure that fans out
+    assert not ok([{"kind": "run_done", "asop_id": "extract"}], run("extract", "s1"), run("extract", "s2"))
 
 
 def test_only_the_latest_attempt_counts():
-    assert ok(JOIN, run("intake", "R1"), run("extract", "s1", 1, done=False), run("extract", "s1", 2))
-    assert not ok(JOIN, run("intake", "R1"), run("extract", "s1", 1), run("extract", "s1", 2, done=False))
+    assert ok(CONV, run("conventions", "R1", 1, done=False), run("conventions", "R1", 2))
+    assert not ok(CONV, run("conventions", "R1", 1), run("conventions", "R1", 2, done=False))
     # by attempt number, not by the order a ledger happens to list them in
-    assert not ok(JOIN, run("intake", "R1"), run("extract", "s1", 2, done=False), run("extract", "s1", 1))
+    assert not ok(CONV, run("conventions", "R1", 2, done=False), run("conventions", "R1", 1))
 
 
-def test_run_done_needs_a_run_and_a_settled_upstream():
-    req_ = [{"kind": "run_done", "asop_id": "consolidate"}]
-    assert not ok(req_)
-    assert ok(req_, run("extract", "s1"), run("consolidate", "R1"))
-    # a sibling extract still open could still hand off — not settled
-    assert not ok(req_, run("extract", "s1"), run("extract", "s2", done=False), run("consolidate", "R1"))
+def test_requires_is_evaluated_within_one_chain():
+    assert not ok(CONV, run("conventions", "R1"), chain="R2")
+    assert ok(CONV, run("conventions", 7), chain="7")
 
 
 def test_every_predicate_must_hold():
     reqs = v(PLAN, "plan")["requires"]
-    done = [run("extract", "s1"), run("consolidate", "R1")]
+    done = [run("conventions", "R1")]
     assert not ok(reqs, *done)
     assert not ok(reqs, approved=["research-review"])
     assert ok(reqs, *done, approved=["research-review"])
 
 
-def test_a_conflict_on_the_waiters_own_key_holds_it():
-    # review N2: the join started with the first finisher's inputs
-    rs = [run("intake", "R1"), run("extract", "s1"), run("extract", "s2", refused_toward=["consolidate"])]
-    assert ok(JOIN, *rs)  # extract itself is settled ...
-    assert not requires_satisfied(JOIN, runs=rs, predecessors=PREDS, waiter="consolidate")  # ... but the join is held
-    rs[2] = run("extract", "s2", 2)  # the refusing run re-attempted cleanly
-    assert requires_satisfied(JOIN, runs=rs, predecessors=PREDS, waiter="consolidate")
-
-
 def test_every_refusal_says_what_it_leaves_unfiled():
-    # review N4/P7: the engine fills refused_toward from `toward`; an undeclared
-    # outcome blocks every target, a refused request blocks nothing
+    # review N4/P7: `toward` is what blocks a join; an undeclared outcome
+    # leaves every target unfiled, a refused request leaves none
     d = plan_intake(outcome="OKAY")
-    assert d[0]["toward"] == ["extract"]
+    assert d[0]["toward"] == ["consolidate", "conventions", "extract"]
     d = plan_intake(requests=[req(subject="nope")])
     assert [x["toward"] for x in d if x["action"] == "refuse"] == [[]]
     d = plan_intake(outputs={"sources": {"items": []}})
     assert d[0]["toward"] == ["extract"]
-    d = plan_extract(existing={"R1|consolidate|R1|a1": {"root": "ELSEWHERE"}})
-    assert d[0]["toward"] == ["consolidate"]
+    d = plan_extract(existing={"R1|index|R1|a1": {"root": "ELSEWHERE"}})
+    assert d[0]["toward"] == ["index"]
 
 
 def test_a_blank_escalation_subject_is_refused_not_raised():

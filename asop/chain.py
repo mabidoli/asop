@@ -10,9 +10,12 @@ leaves the *execution* where it was:
 
 - the predecessor declares where it MAY hand off (`handoffs`), on which of its
   own declared `outcomes`, and exactly how each successor input is computed;
-- the successor declares when it may START (`requires`) — joins and approvals
-  belong to the procedure that waits, because it is the only one that sees
-  every predecessor;
+- a JOIN is declared by the procedure that fans out, as a hand-off with
+  `after`: "when every run my listed hand-offs filed is finished, file this".
+  The engine filed those runs itself, so it knows exactly which to wait for —
+  no reasoning over a graph that escalations and new versions keep moving;
+- the successor declares only what it needs from OUTSIDE its own fan-in before
+  it may START (`requires`): one named chain run done, a human approval;
 - a finished run MAY narrow a fan-out by writing filing requests
   (`asop.filing-request/1`). A run chooses WHICH, never WHAT: a request names
   subjects, never inputs;
@@ -32,6 +35,8 @@ against the same conformance vectors:
 - `plan_handoffs`             given a finished run, what is filed and what is
                               refused? (filing)
 - `plan_escalation`           given a failed run, what does escalation file?
+- `join_state`                may a deferred (`after`) hand-off be filed yet?
+- `plan_join`                 file it, once `join_state` says ready
 - `requires_satisfied`        may a filed run start? (scheduling)
 
 Comparisons are type-strict throughout (`True` is not `1`, `1` is not `"1"`),
@@ -50,7 +55,7 @@ CARDINALITIES = ("one", "many")
 
 # Closed. A predicate an engine cannot evaluate identically to another engine is
 # a fork of the contract, so the list grows by spec version, never by author.
-REQUIRE_KINDS = ("run_done", "all_runs_done", "human_approved")
+REQUIRE_KINDS = ("run_done", "human_approved")
 
 # Predicates one engine used that are deliberately NOT ASOP data, each with
 # where it lives instead. Named so the refusal says where to put it rather than
@@ -59,7 +64,11 @@ NOT_REQUIRE_KINDS = {
     "slot_free": "concurrency is engine configuration, the same for every flow — not ASOP data (§3.7)",
     "artefact_current": "staleness is an engine duty, driven by recorded lineage and input hashes (§3.7)",
     "no_run_for_subject": "filing is idempotent on the natural key, so a second run for a subject is never filed (§3.7)",
+    "all_runs_done": "a join is declared by the procedure that fans out, as a hand-off with `after` (§3.7); "
+                     "the waiting side cannot know which runs will ever be filed",
 }
+
+JOIN_STATES = ("wait", "ready", "blocked")
 
 # The refusal code is `handoff_refused:<rule>`, the same shape as
 # `revision_policy:<rule>`: one code for the class, the rule after the colon.
@@ -341,7 +350,7 @@ def validate_chain_fields(payload: dict, *, asop_id: Optional[str] = None,
             what = f"'handoffs'[{i}]"
             if not isinstance(h, dict):
                 raise ChainContractError(f"{what} must be a mapping.")
-            extra = set(h) - {"id", "to", "on_outcomes", "cardinality", "subject_from", "inputs"}
+            extra = set(h) - {"id", "to", "on_outcomes", "cardinality", "subject_from", "inputs", "after"}
             if extra:
                 raise ChainContractError(f"{what}: unknown field(s) {', '.join(sorted(map(str, extra)))}.")
             hid = _ident(h.get("id"), f"{what}.id")
@@ -397,6 +406,28 @@ def validate_chain_fields(payload: dict, *, asop_id: Optional[str] = None,
                 clean["subject_from"] = _subject_from(h["subject_from"], f"{what}.subject_from", outputs)
             elif h.get("subject_from") is not None:
                 raise ChainContractError(f"{what} is `one`, so 'subject_from' has nothing to fan out over. Remove it.")
+            if h.get("after") is not None:
+                after = _list(h["after"], f"{what}.after", "Omit it for a hand-off filed at completion.")
+                if card != "one":
+                    raise ChainContractError(
+                        f"{what} has 'after', so it is a join, and a join files ONE run once the runs it waits "
+                        f"on are finished. Make it `one`; fan out again from the joined procedure."
+                    )
+                cleaned_after: list[str] = []
+                for a in after:
+                    a = _ident(a, f"{what}.after entry")
+                    if a == hid:
+                        raise ChainContractError(f"{what}.after names itself.")
+                    if a not in seen - {hid}:
+                        raise ChainContractError(
+                            f"{what}.after names '{a}', which is not a hand-off declared EARLIER in this "
+                            f"record. A join waits on runs its own procedure filed, and listing them in "
+                            f"order keeps joins acyclic."
+                        )
+                    if a in cleaned_after:
+                        raise ChainContractError(f"{what}.after names '{a}' twice.")
+                    cleaned_after.append(a)
+                clean["after"] = cleaned_after
             clean["inputs"] = _input_map(h.get("inputs"), f"{what}.inputs", inputs=inputs, outputs=outputs,
                                          subject_ok=(card == "many"))
             handoffs.append(clean)
@@ -433,7 +464,7 @@ def validate_chain_fields(payload: dict, *, asop_id: Optional[str] = None,
                     f"{what}: kind {kind!r} is not one of {', '.join(REQUIRE_KINDS)}. The list is closed: "
                     f"a predicate two engines evaluate differently is a fork of the contract."
                 )
-            if kind in ("run_done", "all_runs_done"):
+            if kind == "run_done":
                 if set(r) != {"kind", "asop_id"}:
                     raise ChainContractError(f"{what}: '{kind}' takes exactly {{kind, asop_id}}.")
                 ref = _ident(r["asop_id"], f"{what}.asop_id")
@@ -478,7 +509,10 @@ def validate_handoff_targets(body: dict, resolve: Resolver, *, asop_id: str) -> 
       which is the bound, and "the decision procedure re-files the step that
       escalated" is a normal pattern;
     - this record does not `require` an ASOP it can itself (transitively) file.
-      It would wait for a run that can only exist after it finishes."""
+      It would wait for a run that can only exist after it finishes. This is
+      checked from THIS record's activation only; a later version of a
+      descendant can still add such a path, which is why a run whose
+      `requires` never hold is bounded by the engine's liveness clock (§3.7)."""
     _ident(asop_id, "validate_handoff_targets asop_id")
     for h in body.get("handoffs", []):
         target = _resolve_or_raise(h["to"], f"hand-off '{h['id']}'", resolve)
@@ -515,7 +549,7 @@ def validate_handoff_targets(body: dict, resolve: Resolver, *, asop_id: str) -> 
             )
     descendants = _walk_handoffs(body, resolve, asop_id)
     for r in body.get("requires", []):
-        if r["kind"] in ("run_done", "all_runs_done") and r["asop_id"] in descendants:
+        if r["kind"] == "run_done" and r["asop_id"] in descendants:
             raise ChainContractError(
                 f"'requires' waits on '{r['asop_id']}', which this ASOP itself (transitively) hands off to. "
                 f"Those runs can only be filed after this one finishes, so it would wait forever."
@@ -562,27 +596,6 @@ def _resolve_or_raise(to: dict, what: str, resolve: Resolver) -> dict:
             f"{what}: no ACTIVE version of '{to['asop_id']}' matches {to.get('version') or to.get('versions')}."
         )
     return found[1]
-
-
-def predecessors_of(bodies: Any) -> dict[str, set[str]]:
-    """asop_id -> the asop_ids whose HAND-OFFS can file it.
-
-    `bodies` is a mapping asop_id -> validated body, or an iterable of
-    `(asop_id, body)` pairs. Pass every version that matters: the ACTIVE ones
-    AND every version a run in the chain pins, because a run pinned to an older
-    version hands off by that version's declarations, and a join that cannot
-    see it fires early.
-
-    Escalation edges are left out on purpose. An escalated run is not done, so
-    anything downstream of it by hand-off is already held; counting the
-    escalation itself would make a join wait on the very procedure it may
-    escalate from."""
-    pairs = bodies.items() if isinstance(bodies, Mapping) else bodies
-    out: dict[str, set[str]] = {}
-    for src, b in pairs:
-        for to in _handoff_edges(b):
-            out.setdefault(to["asop_id"], set()).add(src)
-    return out
 
 
 # ---------------------------------------------------------------------------
@@ -693,10 +706,9 @@ def _resolve_value(value: Any, *, subject: Optional[str], item: Optional[dict],
 
 
 def _refuse(rule: str, detail: str, *, toward: Iterable[str] = (), **ctx) -> dict:
-    """`toward` lists the procedures this refusal leaves unfiled. The engine
-    records it on the run as `refused_toward`; `requires_satisfied` holds a join
-    on it. A refused REQUEST blocks nothing (`toward` empty): the declared
-    hand-off still files without it."""
+    """`toward` lists the procedures this refusal leaves unfiled; a join over
+    that hand-off is then blocked (`join_state`). A refused REQUEST blocks
+    nothing (`toward` empty): the declared hand-off still files without it."""
     return {"action": "refuse", "code": f"{HANDOFF_REFUSED}:{rule}", "detail": detail,
             "toward": sorted(set(toward)), **ctx}
 
@@ -738,8 +750,10 @@ def plan_handoffs(body: dict, *, outcome: Optional[str], outputs: Mapping, run_i
 
     - `{"action": "file", "handoff", "to": {asop_id, version}, "subject", "inputs", "natural_key"}`
     - `{"action": "duplicate", "handoff", "natural_key"}` — already filed with
-      the same inputs; nothing happens. Not a refusal: several runs handing off
-      to one join is the normal case.
+      the same inputs; nothing happens. Not a refusal: a replayed ledger, or
+      several runs handing off to one chain run, is the normal case.
+    - `{"action": "wait", "handoff", "after"}` — a join that fired; it is filed
+      by `plan_join` once `join_state` says `ready`.
     - `{"action": "refuse", "code": "handoff_refused:<rule>", "detail", ...}` —
       recorded, never silently dropped, never repaired.
 
@@ -748,7 +762,8 @@ def plan_handoffs(body: dict, *, outcome: Optional[str], outputs: Mapping, run_i
       files nothing and is refused (`outcome`): a closed set is closed;
     - a hand-off FIRES when the outcome is in its `on_outcomes` (or always,
       when it has none);
-    - a fired `one` hand-off files one run whose subject is the chain;
+    - a fired `one` hand-off files one run whose subject is the chain — at
+      completion, or, when it has `after`, once those runs are finished;
     - a fired `many` hand-off files one run per subject `subject_from` yields,
       or — when the run wrote ACCEPTED requests for it — exactly those subjects;
     - a REFUSED request is as if it had not been written. It never narrows,
@@ -793,63 +808,152 @@ def plan_handoffs(body: dict, *, outcome: Optional[str], outputs: Mapping, run_i
             continue
         grouped.setdefault(h["id"], []).append((i, req))
 
-    # 2. every declared hand-off that fires
+    # 2. every declared hand-off that fires. A join (`after`) is not filed
+    #    now: it is recorded as waiting, and filed by `plan_join` once
+    #    `join_state` says its runs are finished.
     for h in body.get("handoffs", []):
         if not _fires(h, outcome):
             continue
         reqs = grouped.get(h["id"], [])
-        found = resolve(h["to"])
-        if found is None:
-            decisions.append(_refuse("version", f"no ACTIVE version of '{h['to']['asop_id']}' matches "
-                                                f"{h['to'].get('version') or h['to'].get('versions')}",
-                                     handoff=h["id"], toward=[h["to"]["asop_id"]]))
-            continue
-        version, target = found
-        declared = {i["name"] for i in target.get("inputs", [])}
-
         if h["cardinality"] == "one":
-            if len(reqs) > 1:
-                decisions.append(_refuse("cardinality", f"hand-off '{h['id']}' is `one` and received "
-                                                        f"{len(reqs)} requests; all are disregarded",
-                                         handoff=h["id"]))
-            elif reqs and "subject" in reqs[0][1]:
-                decisions.append(_refuse("subject", f"hand-off '{h['id']}' is `one`; its subject is the chain, "
-                                                    f"so a request may not name one", handoff=h["id"],
-                                         request=reqs[0][0]))
-            units = [(chain, None)]
-        else:
-            try:
-                pairs = expand_subjects(h, outputs)
-            except (KeyError, ValueError) as e:
-                decisions.append(_refuse("output", f"hand-off '{h['id']}': {e.args[0]}", handoff=h["id"],
-                                         toward=[h["to"]["asop_id"]]))
-                continue
-            items = dict(pairs)
-            accepted: list[tuple[str, dict]] = []
-            for i, req in reqs:
-                sid = req.get("subject")
-                if sid is None or sid not in items:
-                    decisions.append(_refuse("subject", f"hand-off '{h['id']}': subject {sid!r} is not one "
-                                                        f"'{h['subject_from']['output']}' yields",
-                                             handoff=h["id"], request=i))
-                    continue
-                accepted.append((sid, items[sid]))
-            units = accepted or pairs
+            _check_one_requests(decisions, h, reqs)
+        if "after" in h:
+            decisions.append({"action": "wait", "handoff": h["id"], "after": list(h["after"])})
+            continue
+        _file_handoff(decisions, filed, h, reqs, outputs=outputs, run_inputs=run_inputs,
+                      resolve=resolve, chain=chain, attempt=attempt)
+    return decisions
 
-        for subject, item in units:
-            try:
-                inputs = {k: _resolve_value(v, subject=subject, item=item, run_inputs=run_inputs, outputs=outputs)
-                          for k, v in h["inputs"].items()}
-            except KeyError as e:
-                decisions.append(_refuse("inputs", f"hand-off '{h['id']}': {e.args[0]}",
-                                         handoff=h["id"], subject=subject, toward=[h["to"]["asop_id"]]))
+
+def _check_one_requests(decisions: list, h: dict, reqs: list) -> None:
+    if len(reqs) > 1:
+        decisions.append(_refuse("cardinality", f"hand-off '{h['id']}' is `one` and received "
+                                                f"{len(reqs)} requests; all are disregarded",
+                                 handoff=h["id"]))
+    elif reqs and "subject" in reqs[0][1]:
+        decisions.append(_refuse("subject", f"hand-off '{h['id']}' is `one`; its subject is the chain, "
+                                            f"so a request may not name one", handoff=h["id"],
+                                 request=reqs[0][0]))
+
+
+def _file_handoff(decisions: list, filed: dict, h: dict, reqs: list, *, outputs: Mapping,
+                  run_inputs: Mapping, resolve: Resolver, chain: str, attempt: int) -> None:
+    """File one fired hand-off: resolve its target, expand its subjects, compute
+    its inputs, and file or refuse each unit."""
+    found = resolve(h["to"])
+    if found is None:
+        decisions.append(_refuse("version", f"no ACTIVE version of '{h['to']['asop_id']}' matches "
+                                            f"{h['to'].get('version') or h['to'].get('versions')}",
+                                 handoff=h["id"], toward=[h["to"]["asop_id"]]))
+        return
+    version, target = found
+    declared = {i["name"] for i in target.get("inputs", [])}
+
+    if h["cardinality"] == "one":
+        units = [(chain, None)]
+    else:
+        try:
+            pairs = expand_subjects(h, outputs)
+        except (KeyError, ValueError) as e:
+            decisions.append(_refuse("output", f"hand-off '{h['id']}': {e.args[0]}", handoff=h["id"],
+                                     toward=[h["to"]["asop_id"]]))
+            return
+        items = dict(pairs)
+        accepted: list[tuple[str, dict]] = []
+        for i, req in reqs:
+            sid = req.get("subject")
+            if sid is None or sid not in items:
+                decisions.append(_refuse("subject", f"hand-off '{h['id']}': subject {sid!r} is not one "
+                                                    f"'{h['subject_from']['output']}' yields",
+                                         handoff=h["id"], request=i))
                 continue
-            if set(inputs) != declared:
-                decisions.append(_refuse("inputs", _input_gap(h["to"]["asop_id"], inputs, declared),
-                                         handoff=h["id"], subject=subject, toward=[h["to"]["asop_id"]]))
-                continue
-            _file_or_dup(decisions, filed, handoff=h["id"], to=h["to"], version=version, subject=subject,
-                         inputs=inputs, chain=chain, attempt=attempt)
+            accepted.append((sid, items[sid]))
+        units = accepted or pairs
+
+    for subject, item in units:
+        try:
+            inputs = {k: _resolve_value(v, subject=subject, item=item, run_inputs=run_inputs, outputs=outputs)
+                      for k, v in h["inputs"].items()}
+        except KeyError as e:
+            decisions.append(_refuse("inputs", f"hand-off '{h['id']}': {e.args[0]}",
+                                     handoff=h["id"], subject=subject, toward=[h["to"]["asop_id"]]))
+            continue
+        if set(inputs) != declared:
+            decisions.append(_refuse("inputs", _input_gap(h["to"]["asop_id"], inputs, declared),
+                                     handoff=h["id"], subject=subject, toward=[h["to"]["asop_id"]]))
+            continue
+        _file_or_dup(decisions, filed, handoff=h["id"], to=h["to"], version=version, subject=subject,
+                     inputs=inputs, chain=chain, attempt=attempt)
+
+
+def join_state(after: Iterable[str], *, decisions: Iterable[Mapping], done: Iterable[str] = (),
+               failed: Iterable[str] = ()) -> str:
+    """May a join be filed yet? `"wait"`, `"ready"` or `"blocked"`.
+
+    `after` is the join's list of hand-off ids. `decisions` are the PARENT
+    run's recorded hand-off decisions — from `plan_handoffs`, and from
+    `plan_join` for any join already filed. `done` and `failed` are natural
+    keys whose run finished done, or ended without done (a run re-run to done
+    under its own key is done).
+
+    The join waits on exactly the runs those hand-offs of THIS run filed or
+    found already filed (`duplicate`): nothing else. A run of the same
+    procedure filed by another path — an escalation's decision, another
+    parent — is not part of it, however the graph moves.
+
+    - `blocked` when a refusal of one of those hand-offs left a target unfiled
+      (`toward` non-empty), or one of its runs ended without done. A refusal
+      is never an empty result. The engine surfaces a blocked join to a
+      person; it clears by re-running the failed run to done under its own
+      key, or by re-attempting the parent, which files afresh.
+    - `wait` while a listed hand-off is itself a join not yet filed, or one of
+      the runs is not yet done.
+    - `ready` otherwise — INCLUDING when the hand-offs filed nothing. An
+      empty fan-out is a finished one; a join waiting for runs that will never
+      exist is a deadlock.
+    A refused REQUEST (`toward` empty) blocks nothing."""
+    after = set(after)
+    keys: list[str] = []
+    waiting: set[str] = set()
+    settled: set[str] = set()
+    for d in decisions:
+        hid = d.get("handoff")
+        if hid not in after:
+            continue
+        action = d.get("action")
+        if action == "wait":
+            waiting.add(hid)
+        elif action == "refuse":
+            if d.get("toward"):
+                return "blocked"
+        elif action in ("file", "duplicate"):
+            settled.add(hid)
+            keys.append(d["natural_key"])
+    done, failed = set(done), set(failed)
+    if any(k in failed and k not in done for k in keys):
+        return "blocked"
+    if waiting - settled or not all(k in done for k in keys):
+        return "wait"
+    return "ready"
+
+
+def plan_join(body: dict, handoff_id: str, *, outcome: Optional[str], outputs: Mapping,
+              run_inputs: Mapping, resolve: Resolver, chain: str, existing: Any = (),
+              attempt: int = 1) -> list[dict]:
+    """File a join (a hand-off with `after`) of a finished run, once
+    `join_state` says `ready`. Same decisions as `plan_handoffs` for that one
+    hand-off: its target resolves NOW (a range picks the version active when
+    the join fires), and its inputs read the parent run's inputs and outputs.
+    Returns [] when the run's outcome does not fire it."""
+    h = next((x for x in body.get("handoffs", []) if x["id"] == handoff_id), None)
+    if h is None or "after" not in h:
+        raise ChainContractError(f"'{handoff_id}' is not a join (a hand-off with 'after') of this ASOP.")
+    declared_outcomes = body.get("outcomes")
+    if (declared_outcomes and outcome not in declared_outcomes) or not _fires(h, outcome):
+        return []
+    decisions: list[dict] = []
+    _file_handoff(decisions, _filed_map(existing), h, [], outputs=outputs, run_inputs=run_inputs,
+                  resolve=resolve, chain=chain, attempt=attempt)
     return decisions
 
 
@@ -915,81 +1019,38 @@ def plan_escalation(body: dict, *, subject: str, run_inputs: Mapping, context: M
 # scheduling
 # ---------------------------------------------------------------------------
 
-def requires_satisfied(requires: list[dict], *, runs: Iterable[Mapping],
-                       predecessors: Mapping[str, Iterable[str]] = (),
-                       approved: Iterable[str] = (), waiter: Optional[str] = None) -> bool:
+def requires_satisfied(requires: list[dict], *, chain: str, runs: Iterable[Mapping],
+                       approved: Iterable[str] = ()) -> bool:
     """May a filed run start? Every predicate must hold, within ONE chain.
 
-    `runs` are this chain's runs as `{asop_id, subject, attempt, done,
-    processed, refused_toward?}`. Only the highest attempt per (asop_id,
-    subject) counts. `processed` means its completion was evaluated and its
-    hand-off decisions recorded — true also when nothing fired.
-    `refused_toward` is the union of the `toward` lists of this run's refusals
-    (`plan_handoffs`, `plan_escalation`). `predecessors` is `predecessors_of`
-    over the active versions and every version the chain's runs pin.
-    `waiter` is the asop_id of the run asking to start: a refusal TOWARD it —
-    a `conflict` on its own natural key, say — holds it whatever its
-    predicates say, because what it would be handed is in dispute.
-
-    A block clears only when the refusing run is superseded by a later attempt,
-    whose hand-offs are evaluated afresh — the person's fix is to repair what
-    was refused and re-run, never to mark the refusal resolved.
+    `runs` are this chain's runs as `{asop_id, subject, attempt, done}`.
     `approved` holds artefacts a declared human approved IN THIS CHAIN (§9 —
     the engine resolves the approver; this function does not).
 
-    X is SETTLED when no further run of X can be filed: every run of every
-    ASOP that can (transitively) file X is done and processed, and none has a
-    refused hand-off toward X or toward one of those ASOPs. A refusal is a
-    blocker for a person, never an empty result. An ancestor that never ran —
-    because its own predecessor's outcome closed that branch — has no runs and
-    blocks nothing.
-
-    - `run_done(X)`: X is settled, at least one run of X exists, and all are done.
-    - `all_runs_done(X)`: X is settled and all of its runs are done — zero runs
-      included. An empty fan-out is a finished one; a join waiting for runs a
-      filter guaranteed would never be filed is a deadlock.
+    - `run_done(X)`: X's CHAIN run — the one whose subject is the chain, as a
+      `one` hand-off files it — exists, and its highest attempt is done. A
+      per-subject run of X is not it: waiting on a fan-out is a join, declared
+      with `after` on the procedure that fanned out.
     - `human_approved(A)`: A is approved in this chain.
-    """
-    latest: dict[tuple[str, str], Mapping] = {}
+
+    `requires` is a START condition. A later attempt of X, filed after this
+    run started, does not un-start it; that is staleness, which the engine
+    handles by lineage (§3.7). A run whose `requires` never hold is held, and
+    the engine's liveness clock surfaces it to a person."""
+    latest: dict[str, Mapping] = {}
     for r in runs:
-        k = (r["asop_id"], str(r["subject"]))
-        if k not in latest or r.get("attempt", 1) > latest[k].get("attempt", 1):
-            latest[k] = r
-    preds = {k: set(v) for k, v in dict(predecessors).items()}
+        if str(r["subject"]) != chain:
+            continue
+        a = r["asop_id"]
+        if a not in latest or r.get("attempt", 1) > latest[a].get("attempt", 1):
+            latest[a] = r
     ok = set(approved)
-
-    def ancestors(x: str) -> set[str]:
-        seen: set[str] = set()
-        todo = list(preds.get(x, ()))
-        while todo:
-            a = todo.pop()
-            if a not in seen:
-                seen.add(a)
-                todo.extend(preds.get(a, ()))
-        return seen
-
-    def settled(x: str) -> bool:
-        up = ancestors(x)
-        blocking = up | {x}
-        for (a, _), r in latest.items():
-            if a in up and not (r["done"] and r.get("processed", False)):
-                return False
-            if a in up and blocking & set(r.get("refused_toward") or ()):
-                return False
-        return True
-
-    if waiter is not None and any(waiter in (r.get("refused_toward") or ()) for r in latest.values()):
-        return False
     for req in requires:
-        kind = req["kind"]
-        if kind == "human_approved":
+        if req["kind"] == "human_approved":
             if req["artefact"] not in ok:
                 return False
-            continue
-        x = req["asop_id"]
-        mine = [r for (a, _), r in latest.items() if a == x]
-        if kind == "run_done" and not mine:
-            return False
-        if not settled(x) or not all(r["done"] for r in mine):
-            return False
+        else:
+            r = latest.get(req["asop_id"])
+            if r is None or not r["done"]:
+                return False
     return True

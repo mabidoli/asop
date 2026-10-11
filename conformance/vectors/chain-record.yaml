@@ -225,3 +225,69 @@ vectors:
     refusal: sop_refused
     reaches: "'kind' must be one of"
     because: "a refusal, not a crash"
+
+  - id: cr-accept-join
+    asserts: [A133]
+    asop_id: intake
+    document:
+      <<: *base
+      outcomes: [FETCHED, NOTHING_TO_FETCH]
+      outputs: [{name: sources}]
+      handoffs:
+        - id: each
+          to: {asop_id: extract, version: 2}
+          cardinality: many
+          subject_from: {output: sources, array: sources, id_field: id}
+          inputs: {source_id: $subject, root: $run.inputs.root}
+        - id: merge
+          to: {asop_id: consolidate, version: 1}
+          after: [each]
+          inputs: {root: $run.inputs.root}
+    expect: accept
+    because: "the join lives on the procedure that fanned out, after the fan-out it waits on"
+
+  - id: cr-refuse-join-fans-out
+    asserts: [A133]
+    document:
+      <<: *base
+      outputs: [{name: o}]
+      handoffs:
+        - {id: each, to: {asop_id: a, version: 1}, cardinality: many, subject_from: {output: o, array: items, id_field: id}}
+        - {id: merge, to: {asop_id: b, version: 1}, cardinality: many, subject_from: {output: o, array: items, id_field: id}, after: [each]}
+    expect: refuse
+    refusal: sop_refused
+    reaches: "Make it `one`"
+    because: "a join files one run; fanning out again is the joined procedure's own hand-off"
+
+  - id: cr-refuse-join-after-later
+    asserts: [A133]
+    document:
+      <<: *base
+      handoffs:
+        - {id: merge, to: {asop_id: b, version: 1}, after: [each]}
+        - {id: each, to: {asop_id: a, version: 1}}
+    expect: refuse
+    refusal: sop_refused
+    reaches: "declared EARLIER"
+    because: "a join names hand-offs declared before it, which also keeps joins acyclic"
+
+  - id: cr-refuse-join-after-itself
+    asserts: [A133]
+    document:
+      <<: *base
+      handoffs:
+        - {id: merge, to: {asop_id: b, version: 1}, after: [merge]}
+    expect: refuse
+    refusal: sop_refused
+    reaches: "names itself"
+    because: "a join waiting on itself never fires"
+
+  - id: cr-refuse-all-runs-done
+    asserts: [A115, A133]
+    document:
+      <<: *base
+      requires: [{kind: all_runs_done, asop_id: extract}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "procedure that fans out"
+    because: "withdrawn before release: the waiting side cannot know which runs will ever be filed. The refusal says where a join goes instead"

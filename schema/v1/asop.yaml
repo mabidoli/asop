@@ -256,7 +256,7 @@ properties:
           additionalProperties: false
           required: [kind, asop_id]
           properties:
-            kind: {enum: [run_done, all_runs_done]}
+            kind: {const: run_done}
             asop_id: {$ref: '#/$defs/exactName'}
         - type: object
           additionalProperties: false
@@ -265,9 +265,11 @@ properties:
             kind: {const: human_approved}
             artefact: {$ref: '#/$defs/exactName'}
     description: >-
-      When a filed run may START. Declared on the successor — the only
-      procedure that sees every predecessor — and evaluated within one chain.
-      The kinds are a closed list; concurrency, staleness and duplicate
+      When a filed run may START, beyond being filed: another procedure's
+      CHAIN run is done (`run_done` — the run a `one` hand-off files, never a
+      fan-out's per-subject runs; wait on those with a join, `after`), or a
+      declared human approved an artefact in this chain. Evaluated within one
+      chain. The kinds are a closed list; concurrency, staleness and duplicate
       suppression are engine duties, not predicates (§3.7).
 
   author:
@@ -339,6 +341,7 @@ x-asop-cross-checks:
     - {check: "names (ids, input keys, where keys, outcomes, outputs, artefacts) carry no surrounding whitespace", refusal: "sop_refused"}
     - {check: "at activation: the graph reachable through hand-offs (escalations excluded — a person bounds them) has no cycle", refusal: "sop_refused"}
     - {check: "at activation: no `requires` waits on an ASOP this record can transitively hand off to", refusal: "sop_refused"}
+    - {check: "a hand-off's `after` names only hand-offs declared EARLIER in the same record, not itself; a hand-off with `after` is `one`", refusal: "sop_refused"}
     - {check: "at filing: every hand-off decision matches handoff.yaml's rules", refusal: "handoff_refused:<rule>"}
 
 $defs:
@@ -413,14 +416,34 @@ $defs:
             type: object
             minProperties: 1
             additionalProperties: {type: [string, number, boolean]}
+      after:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._-]*$'
+        description: >-
+          Makes this hand-off a JOIN: it is filed once every run that the
+          listed hand-offs (declared earlier in this record) filed for the
+          same parent run is done — immediately when they filed nothing, and
+          never while one was refused or one of its runs failed. A join is
+          `one`.
       inputs: {$ref: '#/$defs/inputMap'}
-    if:
-      properties: {cardinality: {const: many}}
-      required: [cardinality]
-    then:
-      required: [subject_from]
-    else:
-      not: {required: [subject_from]}
+    allOf:
+      - if:
+          properties: {cardinality: {const: many}}
+          required: [cardinality]
+        then:
+          required: [subject_from]
+        else:
+          not: {required: [subject_from]}
+      - if:
+          required: [after]
+        then:
+          not:
+            properties: {cardinality: {const: many}}
+            required: [cardinality]
 
   # See gate.yaml: presence means valued, and blank is not a value.
   nonBlankString:

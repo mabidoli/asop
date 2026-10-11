@@ -275,9 +275,9 @@ What moves into the artefact is the **declaration**; **execution** stays in the 
 |---|---|---|
 | `outcomes` | any ASOP | the closed set of outcomes a run can finish with |
 | `outputs` | any ASOP | what a run writes that a hand-off may read: `[{name, description?, kind?}]`, the mirror of `inputs` |
-| `handoffs` | the predecessor | where a finished run **may** file next, and how each successor input is computed |
+| `handoffs` | the predecessor | where a finished run **may** file next, and how each successor input is computed; a hand-off with `after` is a **join** |
 | `on_escalate` | any ASOP | which procedure an escalation files (§5.4) |
-| `requires` | the successor | when a filed run may **start** |
+| `requires` | the successor | what a filed run needs from outside its own fan-in before it may **start** |
 
 All five are optional. An ASOP without them is standalone, exactly as in v3.4.
 
@@ -295,6 +295,11 @@ handoffs:
     subject_from: {output: sources, array: sources, id_field: id,
                    where: {kind: [spec, feature]}, where_not: {removed: true}}
     inputs: {source_id: $subject, title: $subject.title, root: $run.inputs.root}
+  - id: consolidate                                 # a join: filed once, when
+    to: {asop_id: consolidate, version: 1}          # every run the fan-out filed
+    on_outcomes: [FETCHED, NOTHING_TO_FETCH]        # is done
+    after: [extract-each-source]
+    inputs: {root: $run.inputs.root}
 on_escalate:
   to: {asop_id: decide, versions: ">=1"}
   inputs: {question_kind: escalation}
@@ -307,8 +312,9 @@ on_escalate:
   completion when `on_outcomes` is absent. A hand-off that does not fire is not a refusal:
   it is the run saying "stop here".
 - **`one`** files one run, whose subject is the chain. Several predecessors handing off to
-  the same successor file it once (see the natural key below), which is how a join is
-  filed.
+  the same successor file it once (see the natural key below). That is **not** a join:
+  the run is filed when the first of them finishes. To wait for all of them, declare a
+  join (`after`, below).
 - **`many`** files one run per subject that `subject_from` yields. The run's `output` must
   be a mapping, and `array` is a dot-separated path of keys within it that leads to a
   list of mappings. An item is kept when two conditions hold:
@@ -384,8 +390,8 @@ files.
 | `conflict` | a run with this natural key was already filed with different inputs |
 
 Every refusal is recorded; none is silently dropped. Each refusal also names `toward`:
-the targets it leaves unfiled. The engine records those on the run as `refused_toward`,
-and that is what holds a join (below).
+the targets it leaves unfiled. A refusal with targets **blocks** a join over that
+hand-off (below), so a refused fan-out is never read as an empty one.
 - An undeclared outcome leaves every target unfiled.
 - A hand-off-level refusal (`output`, `version`, `inputs`, `conflict`) leaves that
   hand-off's target unfiled.
@@ -396,57 +402,70 @@ and that is what holds a join (below).
 - an undeclared outcome is a single decision on its own;
 - otherwise, each request in the order written;
 - then each declared hand-off in declaration order, with its subjects in output order
-  (or request order).
+  (or request order). A join that fires is recorded at its place as **waiting**.
 
 **Idempotency.** Filing is idempotent on the natural key
 `{chain}|{asop_id}|{subject}|a{attempt}`, with `%` and `|` percent-encoded in each part.
 - Filing the same key again **with the same inputs** is a recorded **duplicate**, not a
-  refusal. Several predecessors handing off to one join is the normal case, and a
+  refusal. Several predecessors handing off to one chain run is the normal case, and a
   replayed ledger files nothing twice.
-- Filing the same key **with different inputs** is a `conflict`, so which inputs a join
+- Filing the same key **with different inputs** is a `conflict`, so which inputs a run
   receives never depends on which predecessor finished first.
 - When the engine re-files downstream of a stale input, it files the next **attempt**.
 
-**`requires`** sits on the procedure that waits, because it is the only one that sees
-every predecessor. It is evaluated within one chain, and every predicate must hold
-before a filed run may start:
+**Joins live on the procedure that fans out.** A hand-off with `after` is a join: "when
+every run my listed hand-offs filed is finished, file this". The engine filed those runs
+itself, from this one parent run, so it knows exactly which runs to wait for, and the
+question never needs the wider graph.
+- **Shape.** `after` lists hand-offs declared **earlier** in the same record, never the
+  join itself, so joins are acyclic by construction. A join is `one`: it files one run
+  whose subject is the chain. To fan out again, the joined procedure declares its own
+  hand-off. A join may wait on another join.
+- **At completion** a join that fires is recorded as **waiting**, not filed.
+- **It waits on** exactly the runs its `after` hand-offs filed for this parent run, or
+  found already filed (a `duplicate` the fan-out still relies on), plus any listed join
+  not yet filed. A run of the same procedure filed by any other path (another parent,
+  an escalation's decision) is **not** part of it. Escalations and new versions
+  therefore cannot move what a join waits on.
+- **Ready** when every one of those runs is done, **including when there are none**. An
+  empty fan-out is a finished one; a join waiting for runs that will never exist is a
+  deadlock. Once ready, it is filed like any hand-off: its target resolves **then**, and
+  its inputs read the parent run's inputs and outputs.
+- **Blocked** when a refusal of one of its `after` hand-offs left a target unfiled, or
+  one of their runs ended without done. A refusal is never an empty result, and a
+  failed run is never a finished one. The engine surfaces a blocked join to a person.
+  It clears when the failed run is re-run to done under its own key, or when the parent
+  is re-attempted, which files the fan-out afresh. A refused **request** blocks nothing.
+
+What a join gives up: one procedure cannot wait on runs that two unrelated branches
+filed unless both pass through a single fan-out with a join. That is deliberate. "Has
+every run that could ever be filed finished?" was the question this section first
+asked of the waiting procedure, and three review rounds each found a new early-fire or
+deadlock case in it (see CHANGELOG v3.5).
+
+**`requires`** names what a run needs from **outside** its own fan-in. It is evaluated
+within one chain, and every predicate must hold before a filed run may start:
 
 ```yaml
 requires:
-  - {kind: run_done, asop_id: consolidate}
-  - {kind: all_runs_done, asop_id: map-area}
+  - {kind: run_done, asop_id: conventions}
   - {kind: human_approved, artefact: research-review}
 ```
 
-Only the highest attempt per `(asop_id, subject)` counts. **X is settled** when no further
-run of X can be filed. "Can file" is computed over **hand-offs only**, and over the
-active versions **and every version a run in the chain pins**, because a run pinned to
-an older version hands off by that version's declarations. Escalation edges are left out:
-an escalated run is not done, so anything downstream of it is already held. Counting the
-escalation would make a join wait on the very procedure it may escalate from. X is
-settled when every run of every ASOP that can transitively file X meets three
-conditions:
-- it is done;
-- it has been **processed**: its completion was evaluated and its hand-off decisions
-  recorded, including when nothing fired;
-- it has no refused hand-off toward X or toward one of those ASOPs.
-
-A refusal is a blocker that needs a person, never an empty result. **A refusal toward
-the waiting procedure itself** holds it whatever its predicates say. A `conflict` on its
-own natural key is the typical case: what it would be handed is in dispute. A block
-clears only when the refusing run is superseded by a later attempt, whose hand-offs are
-evaluated afresh. The person's fix is to repair what was refused and re-run, never to
-mark the refusal resolved. An ancestor that never ran, because an earlier outcome closed
-its branch, has no runs and blocks nothing.
-
-- **`run_done(X)`**: X is settled, at least one run of X exists, and every run of X is
-  done.
-- **`all_runs_done(X)`**: X is settled and every run of X is done, **including when there
-  are none**. An empty fan-out is a finished one. A join that waited for runs a filter
-  guaranteed would never be filed would deadlock, and one that fired when the first
-  predecessor finished would start early.
+- **`run_done(X)`**: X's **chain run**, the one whose subject is the chain (as a `one`
+  hand-off files it), exists and its highest attempt is done. Per-subject runs of X
+  never satisfy it: waiting on a fan-out is a join.
 - **`human_approved(A)`**: a declared human (§9) approved artefact A **in this chain**. The
   engine resolves the approver; the record names only what is approved.
+- `requires` is a **start** condition. A later attempt of X, filed after this run
+  started, does not un-start it; that is staleness, which the engine handles by lineage.
+- A run whose `requires` never hold is held, and the engine's **liveness clock**
+  surfaces it to a person. Activation refuses the one wait that can never end (a
+  record requiring an ASOP it can itself transitively file), but only as seen from that
+  record's own activation; a later version of a descendant can still add such a path,
+  and the clock is the backstop.
+- `all_runs_done` was withdrawn before release; a record that declares it is refused
+  with a pointer to joins.
 
 The kinds are a **closed list**. A predicate two engines evaluate differently is a fork of
 the contract, so the list grows by spec version, never by author.
@@ -474,9 +493,12 @@ flow:
 - **Retries.** §5.4 already fixes the policy: one repair, then a person. It is not
   declared per ASOP.
 - **Recording.** Every hand-off decision is ledgered with its parent run: filed,
-  duplicate or refused. Each refusal's `toward` goes into the run's `refused_toward`,
-  which is what keeps a join from reading a refusal as an empty result.
-- **Re-evaluating `requires`** whenever the chain's state changes.
+  duplicate, waiting or refused, with each refusal's `toward`. A join's state is
+  computed from that record, which is what keeps it from reading a refusal as an empty
+  result.
+- **Re-evaluating** waiting joins and `requires` whenever a run in the chain finishes.
+- **Liveness.** A blocked join, or a run whose `requires` have not held within the
+  engine's bound, is surfaced to a person. The bound is engine configuration.
 
 **Compatibility.** The record schema is closed (`additionalProperties: false`), so a v3.4
 reader **refuses** a record that declares hand-offs. That is deliberate: a reader that
@@ -489,11 +511,12 @@ The reference implementation is `asop.chain`. Every function is pure:
   including acyclicity.
 - `plan_handoffs` makes the filing decisions.
 - `plan_escalation` makes the escalation filing.
-- `predecessors_of` builds the graph that `requires_satisfied` reads.
+- `join_state` decides whether a waiting join is `wait`, `ready` or `blocked`.
+- `plan_join` files a join once it is ready.
 - `requires_satisfied` makes the start decision.
 
-All of them are pinned by the conformance vectors in `chain-record.yaml`, `handoff.yaml`
-and `requires.yaml`.
+All of them are pinned by the conformance vectors in `chain-record.yaml`, `handoff.yaml`,
+`join.yaml` and `requires.yaml`.
 
 ---
 
@@ -1127,6 +1150,7 @@ stack trace. Codes relevant to ASOPs, from `asop.refusals`, plus the ones v3 add
 | **promotion** | drafting an ASOP from a run tree that worked |
 | **hand-off** | a declared, outcome-conditioned filing of another ASOP when a run finishes (§3.7) |
 | **chain** | the runs one starting run leads to through hand-offs; the scope of `requires` and of the natural key |
+| **join** | a hand-off with `after`: filed once, when every run the listed hand-offs of the same parent run filed is done (§3.7) |
 | **filing request** | a finished run's own choice of which declared hand-offs and subjects to file; it carries no inputs |
 | **plane** | a coordination layer storing ASOPs and outcomes across harnesses |
 | **harness** | a runtime that executes beads; runs alone or reports to a plane |

@@ -1,122 +1,86 @@
 # Conformance vectors — may a filed run START? (§3.7, v3.5)
 #
-# `requires` is declared on the procedure that waits, because it is the only
-# one that sees every predecessor. Each vector gives the predicates, the
-# chain's runs as `[asop_id, subject, attempt, done, processed, refused_toward?]`,
-# the predecessor graph (asop_id -> the ASOPs that can file it, from the active
-# library), and the artefacts a declared human approved in this chain.
+# `requires` names what a run needs from OUTSIDE its own fan-in: another
+# procedure's CHAIN run done, or a person's approval. Waiting on a fan-out is a
+# join, declared with `after` on the procedure that fanned out (join.yaml).
 #
-# X is SETTLED when no further run of X can be filed: every run of every ASOP
-# that can transitively file X is done and processed, and none has a refused
-# hand-off toward X or toward one of those ASOPs.
+# Each vector gives the predicates, the chain id (default R1), the chain's runs
+# as `[asop_id, subject, attempt, done]`, and the artefacts a declared human
+# approved in this chain. X's chain run is the one whose subject is the chain —
+# the run a `one` hand-off files.
 
 artifact: requires
-x-preds: &preds {extract: [intake], consolidate: [extract]}
 vectors:
-  - id: rq-join-waits-for-every-run
-    asserts: [A124]
-    requires: [{kind: all_runs_done, asop_id: extract}]
-    predecessors: *preds
-    runs: [[intake, R1, 1, true, true], [extract, s1, 1, true, true], [extract, s2, 1, false, false]]
-    satisfied: false
-    because: "one of two filed runs is still open"
-
-  - id: rq-join-holds-when-all-done
-    asserts: [A124]
-    requires: [{kind: all_runs_done, asop_id: extract}]
-    predecessors: *preds
-    runs: [[intake, R1, 1, true, true], [extract, s1, 1, true, true], [extract, s2, 1, true, true]]
-    satisfied: true
-    because: "the fan-out was processed and every run it filed is done"
-
-  - id: rq-join-waits-for-processing
-    asserts: [A124]
-    requires: [{kind: all_runs_done, asop_id: extract}]
-    predecessors: *preds
-    runs: [[intake, R1, 1, true, false]]
-    satisfied: false
-    because: "the predecessor finished but its hand-offs are not yet recorded; more runs of extract may still be filed"
-
-  - id: rq-empty-fan-out-satisfies-join
-    asserts: [A124]
-    requires: [{kind: all_runs_done, asop_id: extract}]
-    predecessors: *preds
-    runs: [[intake, R1, 1, true, true]]
-    satisfied: true
-    because: "THE DEADLOCK CASE. The fan-out ran and its filter yielded nothing; a join waiting for runs that will never exist never fires"
-
-  - id: rq-refused-fan-out-blocks
-    asserts: [A124]
-    requires: [{kind: all_runs_done, asop_id: extract}]
-    predecessors: *preds
-    runs: [[intake, R1, 1, true, true, [extract]]]
-    satisfied: false
-    because: "a refused fan-out is a blocker for a person, never an empty result — otherwise the join starts on missing data"
-
-  - id: rq-sibling-predecessor-still-open
+  - id: rq-run-done-holds
     asserts: [A125]
-    requires: [{kind: run_done, asop_id: consolidate}]
-    predecessors: *preds
-    runs: [[extract, s1, 1, true, true], [extract, s2, 1, false, false], [consolidate, R1, 1, true, true]]
-    satisfied: false
-    because: "THE EARLY-JOIN CASE. An open sibling can still hand off; the first predecessor to finish does not settle the successor"
-
-  - id: rq-branch-never-taken
-    asserts: [A124]
-    requires: [{kind: all_runs_done, asop_id: consolidate}]
-    predecessors: *preds
-    runs: [[intake, R1, 1, true, true]]
+    requires: [{kind: run_done, asop_id: conventions}]
+    runs: [[conventions, R1, 1, true]]
     satisfied: true
-    because: "intake's outcome closed the branch: no extract ran, so no consolidate can be filed — nothing to wait for"
-
-  - id: rq-latest-attempt-counts
-    asserts: [A125]
-    requires: [{kind: run_done, asop_id: consolidate}]
-    predecessors: *preds
-    runs: [[consolidate, R1, 2, false, false], [consolidate, R1, 1, true, true]]
-    satisfied: false
-    because: "attempt 2 superseded attempt 1, whatever order the ledger lists them in"
+    because: "the chain run of conventions is done"
 
   - id: rq-run-done-needs-a-run
     asserts: [A125]
-    requires: [{kind: run_done, asop_id: consolidate}]
-    predecessors: *preds
+    requires: [{kind: run_done, asop_id: conventions}]
     runs: []
     satisfied: false
-    because: "unlike a join, run_done is about a run that must exist"
+    because: "nothing to be done yet; the engine's liveness clock, not this predicate, bounds the wait"
+
+  - id: rq-run-done-still-open
+    asserts: [A125]
+    requires: [{kind: run_done, asop_id: conventions}]
+    runs: [[conventions, R1, 1, false]]
+    satisfied: false
+    because: "filed is not done"
+
+  - id: rq-latest-attempt-counts
+    asserts: [A125]
+    requires: [{kind: run_done, asop_id: conventions}]
+    runs: [[conventions, R1, 2, false], [conventions, R1, 1, true]]
+    satisfied: false
+    because: "attempt 2 superseded attempt 1, whatever order the ledger lists them in"
+
+  - id: rq-latest-attempt-counts-either-order
+    asserts: [A125]
+    requires: [{kind: run_done, asop_id: conventions}]
+    runs: [[conventions, R1, 1, false], [conventions, R1, 2, true]]
+    satisfied: true
+    because: "the same rule read the other way: the re-run attempt 2 is done, so the failed attempt 1 no longer matters"
+
+  - id: rq-per-subject-runs-are-not-the-chain-run
+    asserts: [A125]
+    requires: [{kind: run_done, asop_id: extract}]
+    runs: [[extract, s1, 1, true], [extract, s2, 1, true]]
+    satisfied: false
+    because: "run_done names X's CHAIN run. Done per-subject runs do not satisfy it — waiting on a fan-out is a join (`after`), declared where the fan-out is"
+
+  - id: rq-other-chain-ignored
+    asserts: [A125]
+    chain: R2
+    requires: [{kind: run_done, asop_id: conventions}]
+    runs: [[conventions, R1, 1, true]]
+    satisfied: false
+    because: "requires is evaluated within one chain; R1's run is not R2's"
 
   - id: rq-approval-required
     asserts: [A115]
-    requires: [{kind: run_done, asop_id: consolidate}, {kind: human_approved, artefact: research-review}]
-    predecessors: *preds
-    runs: [[extract, s1, 1, true, true], [consolidate, R1, 1, true, true]]
+    requires: [{kind: run_done, asop_id: conventions}, {kind: human_approved, artefact: research-review}]
+    runs: [[conventions, R1, 1, true]]
     approved: []
     satisfied: false
     because: "every predicate must hold; the approval has not happened in this chain"
 
   - id: rq-all-predicates-hold
     asserts: [A115]
-    requires: [{kind: run_done, asop_id: consolidate}, {kind: human_approved, artefact: research-review}]
-    predecessors: *preds
-    runs: [[extract, s1, 1, true, true], [consolidate, R1, 1, true, true]]
+    requires: [{kind: run_done, asop_id: conventions}, {kind: human_approved, artefact: research-review}]
+    runs: [[conventions, R1, 1, true]]
     approved: [research-review]
     satisfied: true
-    because: "settled, done, approved"
+    because: "done and approved"
 
-  - id: rq-conflict-holds-the-waiter
-    asserts: [A131]
-    requires: [{kind: all_runs_done, asop_id: extract}]
-    predecessors: *preds
-    waiter: consolidate
-    runs: [[intake, R1, 1, true, true], [extract, s1, 1, true, true], [extract, s2, 1, true, true, [consolidate]]]
-    satisfied: false
-    because: "extract is settled, but a refusal TOWARD the waiting join (a conflict on its own key) means what it would be handed is in dispute"
-
-  - id: rq-reattempt-clears-the-block
-    asserts: [A131]
-    requires: [{kind: all_runs_done, asop_id: extract}]
-    predecessors: *preds
-    waiter: consolidate
-    runs: [[intake, R1, 1, true, true], [extract, s1, 1, true, true], [extract, s2, 1, true, true, [consolidate]], [extract, s2, 2, true, true]]
+  - id: rq-integer-chain-subject
+    asserts: [A125]
+    chain: "7"
+    requires: [{kind: run_done, asop_id: conventions}]
+    runs: [[conventions, 7, 1, true]]
     satisfied: true
-    because: "a block clears only when the refusing run is superseded by a later attempt"
+    because: "a subject is compared as a string, as the natural key spells it"

@@ -32,9 +32,9 @@ Five optional record fields:
   - `cardinality: one | many`;
   - `subject_from` with `where` / `where_not`;
   - an `inputs` mapping;
+  - `after`, which makes the hand-off a join;
 - `on_escalate`, whose target must contain a human step;
-- `requires` on the successor: `run_done`, `all_runs_done` or `human_approved`, as a
-  closed list.
+- `requires` on the successor: `run_done` or `human_approved`, as a closed list.
 
 There is also a new output schema, `asop.filing-request/1`
 ([`schema/v1/filing-request.yaml`](schema/v1/filing-request.yaml)), and a new refusal,
@@ -50,15 +50,17 @@ subject, output, inputs, version and conflict. The verb table gains
   alters what the ASOP declared, so one bad request cannot silence a declared fan-out.
 - **A closed outcome set is enforced.** A run that finishes with an outcome its ASOP does
   not declare files nothing, and that is refused rather than silent.
-- **A join waits until its predecessors are settled.** X is settled when every run that
-  could still file X is done and its hand-offs are recorded, with no refusal on the path.
-  - "Could still file" is computed over hand-offs only (escalations excluded), and over
-    every version the chain's runs pin.
-  - An empty fan-out satisfies its join, and a refused one blocks it for a person.
-  - A refusal toward the waiting procedure itself, such as a `conflict`, holds it.
-  - A block clears only when the refusing run is superseded by a later attempt.
+- **A join lives on the procedure that fans out.** It is a hand-off with `after`,
+  filed once, when every run the listed hand-offs of the same parent run filed is done.
+  - An empty fan-out makes it ready at once; a refused fan-out or a failed run blocks it
+    for a person.
+  - Runs filed by any other path are not part of it, so escalations and new versions
+    cannot move what it waits on.
   - Every refusal names the targets it leaves unfiled (`toward`); a refused request
-    leaves none.
+    leaves none, and blocks nothing.
+- **`requires` is narrow:** `run_done(X)` is X's chain run, and `human_approved(A)` is a
+  person's approval in this chain. A run whose `requires` never hold is surfaced by the
+  engine's liveness clock.
 - **Filing is idempotent on a percent-encoded natural key.** A re-filing carries the next
   attempt. The same key with different inputs is a `conflict`.
 - **Comparisons are type-strict.** Subject ids are strings or integers and must be unique;
@@ -77,23 +79,27 @@ subject, output, inputs, version and conflict. The verb table gains
   never fires, and a fan-out would read an output nobody promised to write. That is the
   inter-procedure contract whose absence let a missing field crash a gate in the same
   execution.
-- **`requires` keeps three of the six predicates proposed.**
+- **`requires` keeps two of the six predicates proposed.**
   - `slot_free` is concurrency, which the same proposal called engine configuration.
   - `artefact_current` is staleness, which it recommended as an engine duty.
   - `no_run_for_subject` is redundant with filing being idempotent on the natural key.
+  - `all_runs_done` became joins (below).
 
   Each is refused by name, with where it belongs instead.
+- **Joins moved to the procedure that fans out.** The proposal asked where joins should
+  live and recommended the waiting procedure. This release first shipped that, and it
+  did not hold up (below).
 - **Requests carry no inputs.** The proposal let a request supply inputs, which made a
   successor's inputs depend on what a run wrote, and made the activation check either
   too strict or meaningless.
 - **No per-ASOP `retry` section.** §5.4 already fixes the policy at one repair, then a
   person.
 - **A duplicate with the same inputs is recorded, not refused.** Several predecessors
-  handing off to one join is the normal case.
+  handing off to one chain run is the normal case.
 - **Targets use `asop_id`, not `asop`,** as every other pin does. There is one hand-off
   per target.
 
-**Hardened before release by two rounds of adversarial review.** A first cut of this
+**Hardened before release by three rounds of adversarial review, and one redesign.** A first cut of this
 release was reviewed before anything was published. The first round confirmed 13 defects,
 and each now has a test that fails when the defect is reintroduced; 18 deliberate mutants
 were run and every one was caught. The defects:
@@ -123,6 +129,27 @@ holes:
 
 All of them are fixed, and 6 more mutants were caught.
 
+The third round found three more, all in the join:
+- an escalation from a sibling branch could re-file a run after the join that waited on
+  it had already fired;
+- a join filed per subject with a `one` hand-off either conflicted for ever or, on a
+  re-attempt, silently dropped inputs;
+- activating a newer version of a target added an edge that deadlocked a run already
+  waiting.
+
+All three came from the same design. A join declared on the WAITING procedure
+(`requires: all_runs_done`, "settled") had to decide whether any further run could
+still be filed: global reasoning over a graph that escalations and version changes keep
+moving. Each round fixed the cases found and the next round found new ones. Patching
+it again was not going to converge, so the join moved to the procedure that fans out,
+where the question is local: "are the runs **I** filed done?" `all_runs_done`, the
+"settled" rule, `predecessors_of` and the `waiter` argument were removed before
+release. The three cases are now defined behaviour or impossible:
+- runs filed by other paths are not part of a join;
+- a per-subject `one` hand-off is no longer how a join is written; two filings of one
+  chain run with different inputs are refused as `conflict`, and recorded;
+- a join no longer depends on the graph.
+
 **Compatibility.** Additive for records: every v3.4 record is a valid v3.5 record. It is
 not additive for readers. The schema is closed, so a v3.4 reader refuses a record with
 hand-offs. That is deliberate: dropping hand-offs it did not understand would turn the
@@ -133,16 +160,17 @@ procedure into a dead end. Adopt 0.5.0 before accepting chained records.
 - Reference implementation: `asop.chain`, exported from `asop`:
   - `validate_chain_fields`, `validate_handoff_targets` and `validate_filing_request`;
   - `plan_handoffs` and `plan_escalation`;
-  - `predecessors_of` and `requires_satisfied`.
+  - `join_state` and `plan_join`;
+  - `requires_satisfied`.
 
   `validate_asop` gains an optional `asop_id` keyword, so a store can refuse
   self-reference.
 - Conformance:
-  - three new vector files, `chain-record.yaml` (asop), `handoff.yaml` and
-    `requires.yaml`, with 53 vectors, for 114 in all;
-  - 23 new assertions, A110–A132, of which 21 are cited by a vector. A130 and A132 need
+  - four new vector files, `chain-record.yaml` (asop), `handoff.yaml`, `join.yaml` and
+    `requires.yaml`, with 75 vectors, for 136 in all;
+  - 24 new assertions, A110–A133, of which 22 are cited by a vector. A130 and A132 need
     a resolver, so the Python tests cover them;
-  - the reference runner learns three artifact kinds.
+  - the reference runner learns four artifact kinds.
 - Found while cross-checking, and predating this release: `validate_gate`'s normalised
   output (nulls, `schema_version`) does not validate against the stored step and gate
   schema. It is recorded in `conformance/README.md` and not changed here.

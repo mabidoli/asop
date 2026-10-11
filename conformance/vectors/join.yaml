@@ -1,0 +1,131 @@
+# Conformance vectors — may a JOIN be filed yet? (§3.7, v3.5)
+#
+# A join is a hand-off with `after`, declared on the procedure that fans out.
+# Its question is local: the inputs are the PARENT run's own recorded hand-off
+# decisions (`plan_handoffs`, and `plan_join` for joins already filed), and the
+# natural keys whose runs finished `done` or ended without done (`failed`).
+# Nothing else — not the graph, not other paths' runs, not other versions —
+# which is why two engines cannot disagree about it.
+#
+# `state` is `wait`, `ready` or `blocked`. `blocked` goes to a person.
+
+artifact: join
+x-s1: &s1 {action: file, handoff: each, natural_key: "R1|extract|s1|a1"}
+x-s2: &s2 {action: file, handoff: each, natural_key: "R1|extract|s2|a1"}
+vectors:
+  - id: jn-waits-for-every-run
+    asserts: [A124]
+    after: [each]
+    decisions: [*s1, *s2, {action: wait, handoff: merge}]
+    done: ["R1|extract|s1|a1"]
+    state: wait
+    because: "THE EARLY-JOIN CASE. The first run to finish does not fire the join"
+
+  - id: jn-ready-when-all-done
+    asserts: [A124]
+    after: [each]
+    decisions: [*s1, *s2, {action: wait, handoff: merge}]
+    done: ["R1|extract|s1|a1", "R1|extract|s2|a1"]
+    state: ready
+    because: "every run the fan-out filed is done"
+
+  - id: jn-empty-fan-out-is-ready
+    asserts: [A124]
+    after: [each]
+    decisions: [{action: wait, handoff: merge}]
+    state: ready
+    because: "THE DEADLOCK CASE. The filter yielded nothing; a join waiting for runs that will never exist never fires"
+
+  - id: jn-fan-out-not-fired-is-ready
+    asserts: [A124]
+    after: [each]
+    decisions: []
+    state: ready
+    because: "the outcome fired the join but not the fan-out: nothing was filed, so there is nothing to wait for"
+
+  - id: jn-refused-fan-out-blocks
+    asserts: [A131]
+    after: [each]
+    decisions: [{action: refuse, code: "handoff_refused:output", handoff: each, toward: [extract]}, {action: wait, handoff: merge}]
+    state: blocked
+    because: "a refused fan-out is a blocker for a person, never an empty result — otherwise the join starts on missing data"
+
+  - id: jn-one-refused-subject-blocks
+    asserts: [A131]
+    after: [each]
+    decisions: [*s1, {action: refuse, code: "handoff_refused:inputs", handoff: each, subject: s2, toward: [extract]}]
+    done: ["R1|extract|s1|a1"]
+    state: blocked
+    because: "s2 was never filed; joining on s1 alone would read the gap as nothing"
+
+  - id: jn-refused-request-does-not-block
+    asserts: [A124, A131]
+    after: [each]
+    decisions: [{action: refuse, code: "handoff_refused:subject", handoff: each, request: 0, toward: []}, *s1, *s2]
+    done: ["R1|extract|s1|a1", "R1|extract|s2|a1"]
+    state: ready
+    because: "a refused REQUEST left nothing unfiled; the declared fan-out filed in full"
+
+  - id: jn-failed-run-blocks
+    asserts: [A131]
+    after: [each]
+    decisions: [*s1, *s2]
+    done: ["R1|extract|s1|a1"]
+    failed: ["R1|extract|s2|a1"]
+    state: blocked
+    because: "a run that ended without done never counts as finished; waiting would hang silently, so a person is asked"
+
+  - id: jn-rerun-to-done-clears
+    asserts: [A131]
+    after: [each]
+    decisions: [*s1, *s2]
+    done: ["R1|extract|s1|a1", "R1|extract|s2|a1"]
+    failed: ["R1|extract|s2|a1"]
+    state: ready
+    because: "the failed run was re-run to done under its own key; done wins"
+
+  - id: jn-duplicate-is-waited-on
+    asserts: [A124]
+    after: [each]
+    decisions: [*s1, {action: duplicate, handoff: each, natural_key: "R1|extract|s2|a1"}]
+    done: ["R1|extract|s1|a1"]
+    state: wait
+    because: "s2 was already filed before this run — its fan-out still relies on it, so the join waits for it"
+
+  - id: jn-other-paths-are-not-waited-on
+    asserts: [A124]
+    after: [each]
+    decisions: [*s1, *s2, {action: file, handoff: notify, natural_key: "R1|notify|R1|a1"}]
+    done: ["R1|extract|s1|a1", "R1|extract|s2|a1"]
+    state: ready
+    because: "a run of another hand-off of this run — or of extract filed by an escalation's decision — is not part of this join, however the graph moves"
+
+  - id: jn-join-after-a-join-waits
+    asserts: [A124]
+    after: [merge]
+    decisions: [*s1, {action: wait, handoff: merge}]
+    done: ["R1|extract|s1|a1"]
+    state: wait
+    because: "the join it waits on has not been filed yet; until it is, there is a run still to come"
+
+  - id: jn-join-after-a-join-ready
+    asserts: [A124]
+    after: [merge]
+    decisions: [*s1, {action: wait, handoff: merge}, {action: file, handoff: merge, natural_key: "R1|consolidate|R1|a1"}]
+    done: ["R1|extract|s1|a1", "R1|consolidate|R1|a1"]
+    state: ready
+    because: "the earlier join was filed and its run is done"
+
+  - id: jn-refused-join-blocks-the-next
+    asserts: [A131]
+    after: [merge]
+    decisions: [{action: wait, handoff: merge}, {action: refuse, code: "handoff_refused:conflict", handoff: merge, toward: [consolidate]}]
+    state: blocked
+    because: "the earlier join's filing was refused; what follows it would run on a run that does not exist"
+
+  - id: jn-refused-request-on-a-join-still-waits
+    asserts: [A124, A131]
+    after: [merge]
+    decisions: [{action: refuse, code: "handoff_refused:subject", handoff: merge, request: 0, toward: []}, {action: wait, handoff: merge}]
+    state: wait
+    because: "a refused REQUEST naming the earlier join is not that join being filed; it still has to be filed and finish"

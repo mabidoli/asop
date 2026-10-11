@@ -699,13 +699,17 @@
   testable: true
   violation: "A negative verdict or nonzero exit status releases dependents."
 #
-# NEW RULES, 2026-10-10 — hand-offs (§3.7, v3.5). Extracted as A110-A132 from
+# NEW RULES, 2026-10-10 — hand-offs (§3.7, v3.5). Extracted as A110-A133 from
 # the section that reverses §11.4: what a finished run may file next is
 # declared on the ASOP, and an engine refuses anything not declared. The
-# vocabulary for `applies_to` gains `handoff` (a filing decision) and
-# `requires` (a start decision); both are questions about a run, but they are
-# answered by different functions and an implementation can get one right and
-# the other wrong.
+# vocabulary for `applies_to` gains `handoff` (a filing decision), `join` (may
+# a deferred hand-off be filed yet) and `requires` (a start decision); all are
+# questions about a run, but they are answered by different functions and an
+# implementation can get one right and another wrong.
+#
+# Before release, A124, A125, A131 and A132 were rewritten and A133 added:
+# joins moved from the waiting procedure (`all_runs_done`, "settled") to the
+# procedure that fans out (`after`). See CHANGELOG v3.5 for why.
 - id: A110
   section: "3.7"
   rule: "An ASOP without outcomes, outputs, handoffs, on_escalate or requires is valid and standalone, exactly as before v3.5."
@@ -738,7 +742,7 @@
   violation: "A target carries both, neither, or a range grammar another engine would parse differently."
 - id: A115
   section: "3.7"
-  rule: "`requires` kinds are a closed list: run_done, all_runs_done, human_approved."
+  rule: "`requires` kinds are a closed list: run_done, human_approved. all_runs_done is refused with a pointer to joins (`after`)."
   applies_to: asop
   testable: true
   violation: "A record declares a start predicate an engine invented, which another engine cannot evaluate identically."
@@ -783,7 +787,7 @@
   rule: "Filing is idempotent on the natural key {chain}|{asop_id}|{subject}|a{attempt} (parts percent-encoded); the same key with the same inputs is a recorded duplicate, not a refusal, and the engine files a higher attempt when re-filing downstream of a stale input."
   applies_to: handoff
   testable: true
-  violation: "A replay files twice, a join filed by several predecessors is refused, or a stale re-file is swallowed as a duplicate."
+  violation: "A replay files twice, a chain run filed by several predecessors is refused, or a stale re-file is swallowed as a duplicate."
 - id: A123
   section: "3.7"
   rule: "Every refused request or hand-off is recorded with handoff_refused:<rule>; none is silently dropped, and none is repaired."
@@ -792,16 +796,16 @@
   violation: "A bad request is ignored, or corrected and filed."
 - id: A124
   section: "3.7"
-  rule: "all_runs_done(X) holds when X is settled — every run of every ASOP that can transitively file X is done and processed, with no refused hand-off toward X or those ASOPs — and every run of X is done; zero runs of X satisfies it."
-  applies_to: requires
+  rule: "A join is ready when every run its `after` hand-offs filed or found already filed for the SAME parent run is done, and no listed join is still waiting to be filed; zero such runs is ready. Runs filed by any other path are not part of it."
+  applies_to: join
   testable: true
-  violation: "A join fires before every predecessor has been processed, reads a refused fan-out as empty, or waits forever for runs a filter guaranteed would never be filed."
+  violation: "A join fires when the first run finishes, waits forever on an empty fan-out, or waits on (or is fired by) runs some other path filed."
 - id: A125
   section: "3.7"
-  rule: "run_done(X) holds when X is settled, at least one run of X exists, and every run of X is done; only the highest attempt per subject counts."
+  rule: "run_done(X) holds when X's chain run (subject = the chain) exists in this chain and its highest attempt is done; per-subject runs of X never satisfy it."
   applies_to: requires
   testable: true
-  violation: "A successor starts while a sibling predecessor can still file X, or on a superseded attempt's result."
+  violation: "A successor starts on a superseded attempt's result, on another chain's run, or treats a fan-out's runs as the run it waits on."
 - id: A126
   section: "3.7"
   rule: "An on_escalate target contains a step whose role is human, and its inputs read only the run's inputs and literals."
@@ -819,7 +823,7 @@
   rule: "A filing whose natural key was already filed with different inputs is refused handoff_refused:conflict."
   applies_to: handoff
   testable: true
-  violation: "A join's inputs depend on which predecessor finished first."
+  violation: "A chain run's inputs depend on which predecessor finished first."
 - id: A129
   section: "3.7"
   rule: "An ASOP has at most one hand-off per target asop_id."
@@ -834,14 +838,20 @@
   violation: "A→B→A activates, or a target is left an input no filing can supply."
 - id: A131
   section: "3.7"
-  rule: "A refusal toward the waiting procedure itself holds it whatever its predicates say; a block clears only when the refusing run is superseded by a later attempt."
-  applies_to: requires
+  rule: "A join is blocked — surfaced to a person, never filed — when a refusal of one of its `after` hand-offs left a target unfiled, or one of their runs ended without done; a refused request blocks nothing, and a run re-run to done under its own key clears it."
+  applies_to: join
   testable: true
-  violation: "A join starts while its own inputs are in conflict, or a block is cleared by marking it resolved."
+  violation: "A join reads a refused fan-out or a failed run as finished, or one bad request holds it forever."
 - id: A132
   section: "3.7"
-  rule: "Escalation edges are excluded from cycle detection and from the predecessor graph; at activation a record may not `require` an ASOP it can transitively hand off to."
+  rule: "Escalation edges are excluded from cycle detection; at activation a record may not `require` an ASOP it can transitively hand off to."
   applies_to: asop
   testable: true
-  violation: "A decision procedure that re-files the step that escalated is refused as a cycle, or a join deadlocks on its own run."
+  violation: "A decision procedure that re-files the step that escalated is refused as a cycle, or a run waits on one that can exist only after it finishes."
+- id: A133
+  section: "3.7"
+  rule: "A hand-off with `after` (a join) is `one`, names only hand-offs declared earlier in the same record and not itself; it is not filed at completion but recorded as waiting, and filed once ready with its target resolved then and its inputs read from the parent run."
+  applies_to: asop
+  testable: true
+  violation: "A join fans out, waits on a hand-off declared after it (or itself), or is filed at completion before its runs are finished."
 

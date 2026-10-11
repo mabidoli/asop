@@ -16,12 +16,12 @@ A document and the outcome a conforming implementation must reach. Nothing else.
   because: "a human gate nobody is named on is a gate nobody answers"
 ```
 
-`asserts` cites [`assertions.yaml`](assertions.yaml) — the 132 normative rules
+`asserts` cites [`assertions.yaml`](assertions.yaml) — the 133 normative rules
 extracted from the specification — so a rule with no vector is visibly untested
 rather than quietly untested.
 
 > **These counts are facts about the files, and they went stale once.** They read
-> 107/8/39 while the files said 109/10/61 (now 132/31/114, v3.5), which is worse than having no numbers:
+> 107/8/39 while the files said 109/10/61 (now 133/32/136, v3.5), which is worse than having no numbers:
 > a reader cross-checking a coverage claim against this README would have found a
 > mismatch and concluded the claim was wrong. Recount before trusting:
 >
@@ -73,15 +73,15 @@ Stated here because a suite that hides its own coverage is worse than a small on
   convention rather than contract, and pinning it would make the suite a stricter
   opinion than the standard. The cost is that two conforming implementations may
   return different shapes for the same input.
-- **A pattern-matcher could still pass.** With 114 vectors, an implementation that
+- **A pattern-matcher could still pass.** With 136 vectors, an implementation that
   recognises these specific documents rather than implementing the rules would
   score full marks. Commands are varied across vectors to make that less
   comfortable, but the real answer is more vectors, and the honest statement is
   that passing proves the rules exercised here and nothing beyond them.
 - **Only refusal codes are compared, not messages.** Two implementations may
   refuse the same document for different stated reasons.
-- **31 of the 132 assertions are cited by a vector** (10 before v3.5; 21 of the 23
-  hand-off assertions, A110–A132, are cited, and A130 and A132 need a resolver). The
+- **32 of the 133 assertions are cited by a vector** (10 before v3.5; 22 of the 24
+  hand-off assertions, A110–A133, are cited, and A130 and A132 need a resolver). The
   other 101 are all `testable: true`. 88 of them need artifact types the runner does not have yet —
   an `asop` record, a `step`, a `revision` changeset — so the honest number for
   what is coverable today is smaller than the gap looks.
@@ -163,27 +163,38 @@ and comparing outcomes; nothing here obliges anyone to run this particular runne
 
 ## v3.5 — hand-offs (§3.7)
 
-Three files, because chaining asks three different questions and an implementation can
+Four files, because chaining asks four different questions and an implementation can
 answer one right and another wrong:
 
 - `chain-record.yaml` — record-level: declared outcomes, declared outputs, the reference
-  grammar, the target grammar, the closed `requires` list, no self-reference. Refusals
-  are `sop_refused`, like every record error.
+  grammar, the target grammar, the closed `requires` list, no self-reference, a join's
+  `after`. Refusals are `sop_refused`, like every record error.
 - `handoff.yaml` — the filing decision. The suite carries a shared `library`, so every
   input to the decision is in the file; the expected decisions are listed line by line,
   in order, and two engines must agree on each. Refusal codes are checked against
   `asop.refusals` as `handoff_refused:<rule>`.
-- `requires.yaml` — the start decision: the empty fan-out that must satisfy its join
-  (the deadlock case), the open sibling that must hold it (the early-join case), and the
-  refused fan-out that must block it rather than read as empty, and the conflict that must
-  hold the waiting join itself until a re-attempt clears it.
+  A vector with `join:` asks what a join files once it is ready (`plan_join`).
+- `join.yaml` — may a join be filed yet? The inputs are only the parent run's own
+  decisions and the status of the runs they name: the empty fan-out that must be ready
+  (the deadlock case), the first finished run that must not fire it (the early-join
+  case), the refused fan-out and the failed run that must block it rather than read as
+  finished, and the runs some other path filed, which must not count.
+- `requires.yaml` — the start decision: another procedure's chain run done, a person's
+  approval, within one chain.
 
 The first cut of these files was green while the implementation let one refused request
 cancel a declared fan-out, and while a join fired when the first predecessor finished.
 An adversarial review found both, and found the vectors that should have caught them
 written to expect the wrong answer. The vectors now name those cases
-(`ho-refused-subject-does-not-cancel`, `rq-sibling-predecessor-still-open`). A green
+(`ho-refused-subject-does-not-cancel`, `jn-waits-for-every-run`). A green
 suite that was written alongside the code it tests proves agreement, not correctness.
+
+The join itself was redesigned before release. Joins first lived on the WAITING
+procedure (`requires: all_runs_done`), which had to decide whether any further run
+could still be filed — global reasoning over a graph that escalations and new versions
+keep moving. Three review rounds each found a new early-fire or deadlock case in it.
+A join is now a hand-off with `after` on the procedure that fanned out, over the runs
+that parent run filed: a local question, which is what `join.yaml` asks.
 
 Not yet covered:
 

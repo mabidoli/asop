@@ -24,7 +24,7 @@ from asop.errors import Refusal
 from asop.gates import gate_satisfied, validate_attestation, validate_gate
 from asop.refusals import CODES as REFUSAL_CODES
 from asop.revision import may_flip
-from asop.chain import plan_handoffs, requires_satisfied, version_in
+from asop.chain import join_state, plan_handoffs, plan_join, requires_satisfied, version_in
 from asop.sop import SopContractError, validate_asop
 
 VECTORS = pathlib.Path(__file__).resolve().parents[1] / "vectors"
@@ -41,15 +41,20 @@ def _handoff_decisions(vector: dict, library: dict) -> list[str]:
 
     filer = vector["filer"]
     (_, body), = library[filer].items()
-    decisions = plan_handoffs(
-        validate_asop(body, asop_id=filer), outcome=vector.get("outcome"),
-        outputs=vector.get("outputs") or {}, run_inputs=vector.get("run_inputs") or {},
-        requests=vector.get("requests") or [], resolve=resolve, chain=vector.get("chain", "R1"),
-        existing=vector.get("existing") or {}, attempt=vector.get("attempt", 1),
-    )
+    common = dict(outcome=vector.get("outcome"), outputs=vector.get("outputs") or {},
+                  run_inputs=vector.get("run_inputs") or {}, resolve=resolve, chain=vector.get("chain", "R1"),
+                  existing=vector.get("existing") or {}, attempt=vector.get("attempt", 1))
+    body = validate_asop(body, asop_id=filer)
+    if "join" in vector:
+        # the join's filing, once join.yaml's question says it is ready
+        decisions = plan_join(body, vector["join"], **common)
+    else:
+        decisions = plan_handoffs(body, requests=vector.get("requests") or [], **common)
     out = []
     for d in decisions:
-        if d["action"] == "file":
+        if d["action"] == "wait":
+            out.append(f"wait {d['handoff']}")
+        elif d["action"] == "file":
             out.append(f"file {d['to']['asop_id']}@{d['to']['version']} {d['subject']}")
         elif d["action"] == "duplicate":
             out.append(f"duplicate {d['natural_key']}")
@@ -74,12 +79,20 @@ def run_one(artifact: str, vector: dict, suite: dict | None = None) -> tuple[boo
             if got != want:
                 return False, f"expected {want}, got {got}"
             return True, f"{len(got)} decision(s)"
+        elif artifact == "join":
+            # May a join be filed yet? Only the parent run's own decisions and
+            # the status of the runs they name are inputs (§3.7).
+            got = join_state(vector["after"], decisions=vector.get("decisions") or [],
+                             done=vector.get("done") or [], failed=vector.get("failed") or [])
+            if got != vector["state"]:
+                return False, f"expected state={vector['state']}, got {got}"
+            return True, f"state={got}"
         elif artifact == "requires":
-            # each run: [asop_id, subject, attempt, done, processed, refused_toward?]
-            runs = [{"asop_id": r[0], "subject": r[1], "attempt": r[2], "done": r[3], "processed": r[4],
-                     "refused_toward": r[5] if len(r) > 5 else []} for r in vector.get("runs") or []]
-            got = requires_satisfied(vector["requires"], runs=runs, predecessors=vector.get("predecessors") or {},
-                                     approved=vector.get("approved") or [], waiter=vector.get("waiter"))
+            # each run: [asop_id, subject, attempt, done]
+            runs = [{"asop_id": r[0], "subject": r[1], "attempt": r[2], "done": r[3]}
+                    for r in vector.get("runs") or []]
+            got = requires_satisfied(vector["requires"], chain=vector.get("chain", "R1"), runs=runs,
+                                     approved=vector.get("approved") or [])
             if got != vector["satisfied"]:
                 return False, f"expected satisfied={vector['satisfied']}, got {got}"
             return True, f"satisfied={got}"
