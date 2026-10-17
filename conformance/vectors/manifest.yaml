@@ -1,0 +1,76 @@
+# Conformance vectors — what does a chain PIN at its start? (§3.10, v3.6)
+#
+# A pin vector gives a library (each procedure's ACTIVE version) and the
+# starting procedure; `expect` is the pinned members as `asop_id@version`,
+# sorted, or `refuse`. An impact vector gives two manifests; `impact` lists one
+# `<kind> <name> <effect>` row per member and component, members first, each
+# group sorted by name — computed, never typed.
+
+artifact: manifest
+x-lib: &lib
+  intake:
+    1:
+      title: Intake
+      inputs: [{name: root}]
+      roles: {worker: {kind: agent}}
+      steps: [{name: frame, role: worker, purpose: frame, gate: {kind: deterministic, check: make frame}}]
+      handoffs: [{id: each, to: {asop_id: extract, versions: ">=2"}, inputs: {root: $run.inputs.root}}]
+      on_escalate: {to: {asop_id: decide, versions: ">=1"}}
+  extract:
+    2:
+      title: Extract
+      inputs: [{name: root}]
+      roles: {worker: {kind: agent}}
+      steps: [{name: extract, role: worker, purpose: extract, gate: {kind: deterministic, check: make extract}}]
+  decide:
+    4:
+      title: Decide
+      roles: {person: {kind: human}}
+      steps: [{name: decide, role: person, purpose: decide, gate: {kind: human, check: decide, verifier: dana, max_park_seconds: 60, on_timeout: fail}}]
+x-d: &d "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+x-e: &e "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+x-old: &old
+  schema: asop.chain-manifest/1
+  chain: C1
+  start: {asop_id: intake, version: 1}
+  members: [{asop_id: intake, version: 1, digest: *d}, {asop_id: extract, version: 2, digest: *d}]
+  components: [{name: checker, version: "29", digest: *d}]
+vectors:
+  - id: mf-pins-every-reachable-member
+    asserts: [A153]
+    library: *lib
+    start: intake
+    expect: ["decide@4", "extract@2", "intake@1"]
+    because: "hand-offs and the escalation target are pinned once, at chain start"
+
+  - id: mf-refuses-an-unpinnable-chain
+    asserts: [A153]
+    library:
+      intake:
+        1:
+          title: Intake
+          inputs: [{name: root}]
+          roles: {worker: {kind: agent}}
+          steps: [{name: frame, role: worker, purpose: frame, gate: {kind: deterministic, check: make frame}}]
+          handoffs: [{id: each, to: {asop_id: extract, versions: ">=3"}, inputs: {root: $run.inputs.root}}]
+      extract:
+        2:
+          title: Extract
+          inputs: [{name: root}]
+          roles: {worker: {kind: agent}}
+          steps: [{name: extract, role: worker, purpose: extract, gate: {kind: deterministic, check: make extract}}]
+    start: intake
+    expect: refuse
+    because: "no active version satisfies >=3: the chain is refused at its start, not hours later at a filing"
+
+  - id: mf-impact-names-the-checker
+    asserts: [A155]
+    old: *old
+    new:
+      schema: asop.chain-manifest/1
+      chain: C1
+      start: {asop_id: intake, version: 1}
+      members: [{asop_id: intake, version: 1, digest: *d}, {asop_id: extract, version: 3, digest: *e}, {asop_id: decide, version: 4, digest: *d}]
+      components: [{name: checker, version: "31", digest: *e}]
+    impact: ["member decide added", "member extract changed", "member intake unchanged", "component checker changed"]
+    because: "a gate's meaning is the checker that runs it: an impact report that lists only procedures leaves out the change that matters"

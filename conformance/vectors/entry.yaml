@@ -1,0 +1,76 @@
+# Conformance vectors — may a filed run START, as far as its ENTRY GATES go? (§3.8, v3.6)
+#
+# An entry gate is the consumer's deterministic precondition over declared
+# inputs: the hand-off gate when the input was handed on by a predecessor, the
+# readiness gate when it was supplied at chain start (a source document). The
+# engine runs it; this question is what it decides from the outcomes.
+#
+# `outcomes` maps a gate id to what the engine's run of it reached; `producers`
+# maps each input to the natural key of the run that handed it on, or null for
+# a source. `expect` is the decision (`start`, `wait` or `not_ready`), then one
+# `refile <key>[ charged]` per producer to re-file and one `hold <gate> <reason>`
+# per source held for a person. The consumer is never charged: it did not start.
+
+artifact: entry
+library:
+  build:
+    title: Build one task
+    inputs: [{name: task}, {name: source}]
+    roles: {worker: {kind: agent}}
+    steps: [{name: build, role: worker, purpose: build it, gate: {kind: deterministic, check: make build}}]
+    entry_gates:
+      - {id: task-buildable, over: [task], gate: {kind: deterministic, check: "lint-task", cannot_evaluate_exit: 3}}
+      - {id: source-ready, over: [source], gate: {kind: deterministic, check: "check-source --final --no-open-decisions", cannot_evaluate_exit: 3}}
+vectors:
+  - id: en-all-passed-starts
+    asserts: [A147]
+    consumer: build
+    outcomes: {task-buildable: passed, source-ready: passed}
+    producers: {task: "C1|plan|C1|a1", source: null}
+    expect: [start]
+
+  - id: en-unevaluated-waits
+    asserts: [A147]
+    consumer: build
+    outcomes: {task-buildable: passed}
+    producers: {task: "C1|plan|C1|a1", source: null}
+    expect: [wait]
+
+  - id: en-cannot-evaluate-refiles-producer-uncharged
+    asserts: [A147]
+    consumer: build
+    outcomes: {task-buildable: cannot_evaluate, source-ready: passed}
+    producers: {task: "C1|plan|C1|a1", source: null}
+    expect: [not_ready, "refile C1|plan|C1|a1"]
+    because: "THE HAND-OFF GATE. The consumer could not evaluate what it was handed: the producer is re-filed, no attempt is consumed, nothing downstream is released"
+
+  - id: en-failure-is-charged-to-the-producer
+    asserts: [A147]
+    consumer: build
+    outcomes: {task-buildable: failed, source-ready: passed}
+    producers: {task: "C1|plan|C1|a1", source: null}
+    expect: [not_ready, "refile C1|plan|C1|a1 charged"]
+    because: "the producer's output broke the declared contract; that is the producer's failure, found where it can still be fixed cheaply"
+
+  - id: en-source-not-ready-holds
+    asserts: [A147]
+    consumer: build
+    outcomes: {task-buildable: passed, source-ready: cannot_evaluate}
+    producers: {task: "C1|plan|C1|a1", source: null}
+    expect: [not_ready, "hold source-ready source_not_ready"]
+    because: "THE READINESS GATE. The source document is not final; there is no producer to re-file, so a person is asked"
+
+  - id: en-source-rejected-holds
+    asserts: [A147]
+    consumer: build
+    outcomes: {task-buildable: passed, source-ready: failed}
+    producers: {task: "C1|plan|C1|a1", source: null}
+    expect: [not_ready, "hold source-ready source_rejected"]
+
+  - id: en-refusal-beats-waiting
+    asserts: [A147]
+    consumer: build
+    outcomes: {task-buildable: failed}
+    producers: {task: "C1|plan|C1|a1", source: null}
+    expect: [not_ready, "refile C1|plan|C1|a1 charged"]
+    because: "one gate already refused; waiting for the other would only delay the re-file"

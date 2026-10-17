@@ -264,6 +264,22 @@ properties:
           properties:
             kind: {const: human_approved}
             artefact: {$ref: '#/$defs/exactName'}
+            binds_digest:
+              type: boolean
+              description: >-
+                v3.6. The approval holds only while it binds the artefact's
+                CURRENT digest; a changed artefact was not approved.
+        - type: object
+          additionalProperties: false
+          required: [kind, id, gate]
+          properties:
+            kind: {const: chain_gate}
+            id: {$ref: '#/$defs/exactName'}
+            gate:
+              $ref: '#/$defs/engineGate'
+          description: >-
+            v3.6. A deterministic gate the engine runs over the chain's run
+            ledger; holds only when it passed. Chain-level done (§5.8).
     description: >-
       When a filed run may START, beyond being filed: another procedure's
       CHAIN run is done (`run_done` — the run a `one` hand-off files, never a
@@ -271,6 +287,97 @@ properties:
       declared human approved an artefact in this chain. Evaluated within one
       chain. The kinds are a closed list; concurrency, staleness and duplicate
       suppression are engine duties, not predicates (§3.7).
+
+  # ---- v3.6: entry gates (§3.8) and rework (§3.9) -------------------------------
+  # Optional, and refused by a v3.5 reader for the same reason as hand-offs: a
+  # reader that dropped a precondition or a loop bound it did not understand
+  # would run the procedure without it.
+
+  entry_gates:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      additionalProperties: false
+      required: [id, over, gate]
+      properties:
+        id:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._-]*$'
+        over:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {$ref: '#/$defs/exactName'}
+          description: Declared inputs the gate reads (a cross-check).
+        gate:
+          $ref: '#/$defs/engineGate'
+    description: >-
+      The consumer's precondition over what it is handed — the hand-off gate —
+      or over a source supplied at chain start — the readiness gate. Run by
+      the engine before the run may start. A gate that could not evaluate
+      re-files the producer without charging an attempt, or holds the run for
+      a person when the input is a source; the consumer is never charged.
+
+  rework:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      additionalProperties: false
+      required: [id, to, max_rounds, consumes_attempt]
+      properties:
+        id:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._-]*$'
+        to:
+          oneOf:
+            - type: object
+              additionalProperties: false
+              required: [step]
+              properties:
+                step: {type: integer, minimum: 1}
+            - $ref: '#/$defs/target'
+        on_step_failure:
+          type: integer
+          minimum: 2
+          description: With a step target; a later step whose gate failure triggers it.
+        on_outcomes:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {$ref: '#/$defs/exactName'}
+          description: With a procedure target; declared outcomes no hand-off fires on.
+        findings:
+          $ref: '#/$defs/exactName'
+          description: A declared output carried upstream as the re-filed run's prior findings.
+        max_rounds:
+          type: integer
+          minimum: 1
+          maximum: 3
+        consumes_attempt:
+          type: boolean
+          description: Whether a round spends §5.4's budget. No default, deliberately.
+        tier_bump:
+          type: boolean
+          description: >-
+            The engine may bind the re-filed run's roles to a more capable
+            binding. What "more capable" means is local (§7).
+      allOf:
+        - if: {properties: {to: {required: [step]}}}
+          then:
+            required: [on_step_failure]
+            not:
+              anyOf: [{required: [on_outcomes]}, {required: [findings]}]
+          else:
+            required: [on_outcomes]
+            not: {required: [on_step_failure]}
+    description: >-
+      Declared, bounded loops: back to an earlier step of this procedure when
+      a later step's gate fails, or back to the upstream procedure that owns a
+      finding when this run ends with a rework outcome. Exhausted rounds
+      escalate (§5.4). Excluded from the hand-off cycle check: `max_rounds`
+      is their bound.
 
   author:
     description: Who wrote this version.
@@ -343,6 +450,13 @@ x-asop-cross-checks:
     - {check: "at activation: no `requires` waits on an ASOP this record can transitively hand off to", refusal: "sop_refused"}
     - {check: "a hand-off's `after` names only hand-offs declared EARLIER in the same record, not itself; a hand-off with `after` is `one`", refusal: "sop_refused"}
     - {check: "at filing: every hand-off decision matches handoff.yaml's rules", refusal: "handoff_refused:<rule>"}
+    # v3.6
+    - {check: "an entry gate reads only declared inputs; entry and chain gates are deterministic", refusal: "sop_refused"}
+    - {check: "a step rework names a step earlier than its on_step_failure; a procedure rework fires on declared outcomes no hand-off fires on, and its findings are a declared output", refusal: "sop_refused"}
+    - {check: "one rework edge per trigger; a procedure rework does not target the record itself", refusal: "sop_refused"}
+    - {check: "subject_from.order_by is not the id field; concurrency >= 1; approved_subset is true or absent", refusal: "sop_refused"}
+    - {check: "at activation: a procedure rework's target hands off, transitively, to this record (it is upstream)", refusal: "sop_refused"}
+    - {check: "at activation: a hand-off with preflight targets a procedure that declares entry gates", refusal: "sop_refused"}
 
 $defs:
   target:
@@ -416,6 +530,27 @@ $defs:
             type: object
             minProperties: 1
             additionalProperties: {type: [string, number, boolean]}
+          order_by:
+            $ref: '#/$defs/exactName'
+            description: >-
+              v3.6. The item field listing the subjects it depends on. Each
+              filed run waits for those runs; a dependency the hand-off does
+              not file, or a cycle, is refused (`order`).
+          concurrency:
+            type: integer
+            minimum: 1
+            description: v3.6. At most this many of the fan-out's runs run at once.
+          approved_subset:
+            const: true
+            description: >-
+              v3.6. File only subjects a person approved, in an approval that
+              binds the output's current digest (schema/v1/approval.yaml).
+      preflight:
+        type: boolean
+        description: >-
+          v3.6. Run the target's entry gates against this run's would-be
+          filings before the run is recorded done, so a defect fails the
+          producer that made it.
       after:
         type: array
         minItems: 1
@@ -444,6 +579,13 @@ $defs:
           not:
             properties: {cardinality: {const: many}}
             required: [cardinality]
+
+  engineGate:
+    # A gate the ENGINE runs over documents (an entry gate, a chain gate):
+    # the shared gate schema, deterministic only.
+    allOf:
+      - $ref: 'gate.yaml'
+      - properties: {kind: {const: deterministic}}
 
   # See gate.yaml: presence means valued, and blank is not a value.
   nonBlankString:

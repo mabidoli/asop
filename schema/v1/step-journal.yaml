@@ -1,0 +1,53 @@
+# =============================================================================
+# Step journal entry — appended when a step starts and when it ends
+# (ASOP.md §5.6, v3.6).
+#
+# JSON Schema draft 2020-12, authored in YAML. Appended per step, never in a
+# batch at the end of the run: a batch makes step timings artefacts of the
+# flush, hides from the next step what this one wrote, and turns a crash into
+# a failure. A step whose last entry is `started` was interrupted; it resumes,
+# and its re-run is not an attempt.
+# =============================================================================
+
+$id: https://raw.githubusercontent.com/mabidoli/asop/main/schema/v1/step-journal.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Step journal entry
+type: object
+additionalProperties: false
+required: [schema, natural_key, step, attempt, event, at]
+properties:
+  schema:
+    const: asop.step-journal/1
+  natural_key:
+    type: string
+    pattern: '^\S([\s\S]*\S)?$'
+    description: The run's natural key (§3.7).
+  step: {type: integer, minimum: 1}
+  attempt:
+    type: integer
+    minimum: 1
+    description: The lease attempt (§5.2) — fencing, not §5.4's budget.
+  event:
+    enum: [started, passed, failed, cannot_evaluate, parked, done_on_default, escalated]
+  at:
+    type: string
+    format: date-time
+  fault_class:
+    enum: [work, environment, checker, handoff, decision]
+    description: >-
+      On failed, cannot_evaluate and escalated entries only. Only `work`, or
+      no class, is charged to §5.4's budget.
+  outputs:
+    type: object
+    additionalProperties:
+      type: string
+      minLength: 1
+    description: Declared output name -> digest of what the step wrote.
+  reason:
+    type: string
+    pattern: '\S'
+allOf:
+  - if: {required: [fault_class]}
+    then:
+      properties:
+        event: {enum: [failed, cannot_evaluate, escalated]}

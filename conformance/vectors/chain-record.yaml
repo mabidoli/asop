@@ -291,3 +291,166 @@ vectors:
     refusal: sop_refused
     reaches: "procedure that fans out"
     because: "withdrawn before release: the waiting side cannot know which runs will ever be filed. The refusal says where a join goes instead"
+
+  # ---- v3.6: entry gates (§3.8), rework (§3.9), typed fan-outs (§3.7) ------
+  - id: cr-accept-entry-gate
+    asserts: [A146]
+    document:
+      <<: *base
+      entry_gates: [{id: root-ready, over: [root], gate: {kind: deterministic, check: "check-source --final", cannot_evaluate_exit: 3}}]
+    expect: accept
+    because: "a consumer's precondition over a declared input; a readiness gate is the same thing over a source"
+
+  - id: cr-refuse-entry-gate-undeclared-input
+    asserts: [A146]
+    document:
+      <<: *base
+      entry_gates: [{id: g, over: [plan], gate: {kind: deterministic, check: "lint"}}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "does not declare"
+    because: "an entry gate checks what the run is handed, so it may read only declared inputs"
+
+  - id: cr-refuse-entry-gate-judged
+    asserts: [A146]
+    document:
+      <<: *base
+      entry_gates: [{id: g, over: [root], gate: {kind: judged, check: "is it good"}}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "deterministic"
+    because: "an entry gate is run by the engine over documents; a judgment is a step"
+
+  - id: cr-accept-step-rework
+    asserts: [A149]
+    document:
+      <<: *base
+      steps:
+        - {name: write-tests, role: worker, purpose: write them, gate: {kind: deterministic, check: make t}}
+        - {name: implement, role: worker, purpose: implement, gate: {kind: deterministic, check: make i}}
+        - {name: prove, role: worker, purpose: prove they bite, gate: {kind: deterministic, check: make p}}
+      rework: [{id: rewrite-tests, to: {step: 1}, on_step_failure: 3, max_rounds: 2, consumes_attempt: false}]
+    expect: accept
+    because: "tests that do not bite send the work back to the step that wrote them, at most twice"
+
+  - id: cr-refuse-rework-forward
+    asserts: [A149]
+    document:
+      <<: *base
+      steps:
+        - {name: a, role: worker, purpose: a, gate: {kind: deterministic, check: make a}}
+        - {name: b, role: worker, purpose: b, gate: {kind: deterministic, check: make b}}
+      rework: [{id: r, to: {step: 2}, on_step_failure: 1, max_rounds: 1, consumes_attempt: true}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "not earlier"
+    because: "rework goes back; a failing step re-running itself is a repair"
+
+  - id: cr-refuse-rework-unbounded
+    asserts: [A149]
+    document:
+      <<: *base
+      steps:
+        - {name: a, role: worker, purpose: a, gate: {kind: deterministic, check: make a}}
+        - {name: b, role: worker, purpose: b, gate: {kind: deterministic, check: make b}}
+      rework: [{id: r, to: {step: 1}, on_step_failure: 2, max_rounds: 9, consumes_attempt: true}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "max_rounds"
+    because: "a loop with no person in it is bounded by the contract, not by the author's optimism"
+
+  - id: cr-refuse-rework-without-attempt-decision
+    asserts: [A149]
+    document:
+      <<: *base
+      steps:
+        - {name: a, role: worker, purpose: a, gate: {kind: deterministic, check: make a}}
+        - {name: b, role: worker, purpose: b, gate: {kind: deterministic, check: make b}}
+      rework: [{id: r, to: {step: 1}, on_step_failure: 2, max_rounds: 1}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "no default"
+    because: "whether a round spends the repair budget is a decision; the contract will not guess it"
+
+  - id: cr-accept-procedure-rework
+    asserts: [A149]
+    asop_id: review
+    document:
+      <<: *base
+      outcomes: [ACCEPTED, PLAN_FINDINGS]
+      outputs: [{name: findings}]
+      rework: [{id: replan, to: {asop_id: plan, versions: ">=1"}, on_outcomes: [PLAN_FINDINGS], findings: findings, max_rounds: 2, consumes_attempt: false, tier_bump: true}]
+    expect: accept
+    because: "a review's findings go back to the procedure that owns them, carrying the findings, at most twice"
+
+  - id: cr-refuse-rework-shares-outcome-with-handoff
+    asserts: [A149]
+    asop_id: review
+    document:
+      <<: *base
+      outcomes: [ACCEPTED, PLAN_FINDINGS]
+      handoffs: [{id: close, to: {asop_id: close, version: 1}, inputs: {root: $run.inputs.root}}]
+      rework: [{id: replan, to: {asop_id: plan, version: 1}, on_outcomes: [PLAN_FINDINGS], max_rounds: 1, consumes_attempt: true}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "does not also send it forward"
+    because: "the hand-off fires on every completion, PLAN_FINDINGS included: one run would send the same work forward and back"
+
+  - id: cr-refuse-rework-findings-undeclared
+    asserts: [A149]
+    asop_id: review
+    document:
+      <<: *base
+      outcomes: [ACCEPTED, PLAN_FINDINGS]
+      rework: [{id: replan, to: {asop_id: plan, version: 1}, on_outcomes: [PLAN_FINDINGS], findings: notes, max_rounds: 1, consumes_attempt: true}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "not a declared output"
+    because: "the findings carried upstream are something this procedure promises to write"
+
+  - id: cr-accept-ordered-approved-fan-out
+    asserts: [A141, A143]
+    asop_id: planner
+    document:
+      <<: *base
+      outputs: [{name: tasks}]
+      handoffs:
+        - id: build-each
+          to: {asop_id: build, version: 1}
+          cardinality: many
+          subject_from: {output: tasks, array: tasks, id_field: id, order_by: depends_on, concurrency: 2, approved_subset: true}
+          inputs: {task: $subject}
+    expect: accept
+
+  - id: cr-refuse-concurrency-zero
+    asserts: [A142]
+    document:
+      <<: *base
+      outputs: [{name: tasks}]
+      handoffs:
+        - id: build-each
+          to: {asop_id: build, version: 1}
+          cardinality: many
+          subject_from: {output: tasks, array: tasks, id_field: id, concurrency: 0}
+    expect: refuse
+    refusal: sop_refused
+    reaches: "concurrency must be a positive integer"
+
+  - id: cr-accept-chain-gate-and-bound-approval
+    asserts: [A144, A145]
+    document:
+      <<: *base
+      requires:
+        - {kind: human_approved, artefact: plan-approval, binds_digest: true}
+        - {kind: chain_gate, id: every-requirement-traced, gate: {kind: deterministic, check: "trace --ledger"}}
+    expect: accept
+
+  - id: cr-refuse-chain-gate-human
+    asserts: [A145]
+    document:
+      <<: *base
+      requires: [{kind: chain_gate, id: sign-off, gate: {kind: human, check: "sign it", verifier: dana, max_park_seconds: 60, on_timeout: fail}}]
+    expect: refuse
+    refusal: sop_refused
+    reaches: "deterministic"
+    because: "a chain gate is the engine reading the ledger; a person's sign-off is a step"

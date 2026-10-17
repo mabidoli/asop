@@ -1,0 +1,50 @@
+# Conformance vectors — where does a run stand after a restart, and what is CHARGED? (§5.4, §5.6, v3.6)
+#
+# `entries` are one run's journal in append order, as [step, event,
+# fault_class?]. A resume vector's `expect` names the fields of the resume
+# point it checks; a budget vector gives `step` and the `charged` failures
+# §5.4 counts for it.
+
+artifact: journal
+procedure:
+  title: Three steps
+  roles: {w: {kind: agent}}
+  steps:
+    - {name: a, role: w, purpose: a, gate: {kind: deterministic, check: make a}}
+    - {name: b, role: w, purpose: b, gate: {kind: deterministic, check: make b}}
+    - {name: c, role: w, purpose: c, gate: {kind: deterministic, check: make c}}
+vectors:
+  - id: jr-crash-mid-step-resumes-there
+    asserts: [A156]
+    entries: [[1, started], [1, passed], [2, started]]
+    expect: {done: [1], crashed: [2], next: [2]}
+    because: "the step's last entry is `started`: it was interrupted, and resumes from the journal alone"
+
+  - id: jr-fresh-run-starts-at-one
+    asserts: [A156]
+    entries: []
+    expect: {next: [1]}
+
+  - id: jr-parked-step-is-not-resumed
+    asserts: [A156]
+    entries: [[1, passed], [2, parked]]
+    expect: {parked: [2], next: []}
+
+  - id: jr-last-entry-decides
+    asserts: [A156]
+    entries: [[1, failed], [1, started], [1, passed]]
+    expect: {done: [1], failed: [], next: [2]}
+
+  - id: jr-crash-is-not-an-attempt
+    asserts: [A157]
+    entries: [[2, started], [2, started], [2, failed], [2, started]]
+    step: 2
+    charged: 1
+    because: "two crashes reached no gate; only the gate failure counts toward §5.4"
+
+  - id: jr-only-work-failures-are-charged
+    asserts: [A157]
+    entries: [[1, failed, environment], [1, cannot_evaluate], [1, failed, checker], [1, failed, work], [1, failed]]
+    step: 1
+    charged: 2
+    because: "the environment, the checker and an input that could not be evaluated are not the executor's failures; an unclassified failure is charged, as in v3.5"

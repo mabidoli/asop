@@ -10,6 +10,8 @@
 #   section     the ASOP.md section the rule comes from
 #   rule        the rule as one imperative sentence
 #   applies_to  gate | step | asop | attestation | revision | run
+#               | handoff | join | requires (v3.5)
+#               | entry | rework | manifest | journal | staleness | chain (v3.6)
 #   testable    can a document alone prove or violate it
 #   violation   what a document that breaks the rule looks like
 #
@@ -860,4 +862,153 @@
   applies_to: handoff
   testable: true
   violation: "A join is filed before its runs are finished, against the version active at completion, or from a superseded attempt's fan-out."
-
+- id: A135
+  section: "3.3"
+  rule: "A deterministic gate declaring `cannot_evaluate_exit` reaches `cannot_evaluate` on that exit status; it never releases dependents and is never charged to the executor."
+  applies_to: gate
+  testable: true
+  violation: "An exit 3 from a gate that declared it is recorded as a failure and spends the executor's repair."
+- id: A136
+  section: "3.3"
+  rule: "A deterministic gate declaring `min_cases` does not pass on exit 0 when the attestation ran fewer cases; the outcome is `cannot_evaluate`."
+  applies_to: gate
+  testable: true
+  violation: "A suite that collected zero tests exits 0 and its step is recorded done."
+- id: A137
+  section: "3.3"
+  rule: "An attestation for a gate declaring `min_cases` carries `cases_run`, a non-negative integer."
+  applies_to: attestation
+  testable: true
+  violation: "Evidence for a case-floored gate omits the count."
+- id: A138
+  section: "3.3"
+  rule: "`cannot_evaluate_exit` (1..255) and `min_cases` (>= 1) are declared on deterministic gates only."
+  applies_to: gate
+  testable: true
+  violation: "A judged gate declares an exit status nothing reads, or a floor of zero cases."
+- id: A139
+  section: "3.3"
+  rule: "`on_timeout: proceed_on_default` is declared on human gates only, with `default: {option, consequence, audience}`, each non-blank; `default` under any other `on_timeout` is refused."
+  applies_to: gate
+  testable: true
+  violation: "A gate proceeds on a default with no consequence or audience, or a deterministic check proceeds on a default."
+- id: A140
+  section: "5.2"
+  rule: "A gate declaring neither `cannot_evaluate_exit` nor `min_cases` has exactly its v3.5 outcomes."
+  applies_to: gate
+  testable: true
+  violation: "An adopter's existing gate changes meaning on upgrade."
+- id: A141
+  section: "3.7"
+  rule: "With `subject_from.order_by`, every filed run carries `depends_on` (natural keys); a dependency the hand-off does not file, or a cycle, refuses the hand-off (`order`), and requests that cause it are refused while the declaration files."
+  applies_to: handoff
+  testable: true
+  violation: "A fan-out files a run that waits for a run nobody files, or one request makes a declared fan-out unfileable."
+- id: A142
+  section: "3.7"
+  rule: "A fan-out's run may start only when every run in its `depends_on` is done and starting it keeps the hand-off's running runs within `concurrency`."
+  applies_to: handoff
+  testable: true
+  violation: "A task starts before its prerequisite finished, or a wave exceeds its declared bound."
+- id: A143
+  section: "3.7"
+  rule: "With `subject_from.approved_subset`, only subjects in an approval that binds the output's current digest are filed; a missing or stale approval, or one naming a subject the output lacks, refuses the hand-off (`approval`)."
+  applies_to: handoff
+  testable: true
+  violation: "A changed plan is built on its predecessor's approval."
+- id: A144
+  section: "3.7"
+  rule: "`human_approved` with `binds_digest` holds only when the approval's digest equals the artefact's current digest; a name alone fails closed."
+  applies_to: requires
+  testable: true
+  violation: "A run starts on an approval of an earlier version of the artefact."
+- id: A145
+  section: "3.7"
+  rule: "A `chain_gate` requirement is a deterministic gate over the run ledger and holds only when its outcome is `passed`."
+  applies_to: requires
+  testable: true
+  violation: "A terminal procedure starts while the chain-level check failed or could not evaluate."
+- id: A146
+  section: "3.8"
+  rule: "Entry gates are deterministic, read only declared inputs, and have unique ids."
+  applies_to: asop
+  testable: true
+  violation: "An entry gate reads an undeclared input, or asks a judge."
+- id: A147
+  section: "3.8"
+  rule: "Entry gate outcomes decide start, wait or not_ready: a refused gate over a handed-on input re-files its producer (charged only on `failed`), one over a source holds the run for a person, and the consumer is never charged."
+  applies_to: entry
+  testable: true
+  violation: "A consumer's attempt is consumed because its input was broken, or a not-final source starts a procedure."
+- id: A148
+  section: "3.8"
+  rule: "A hand-off declaring `preflight` targets a procedure with entry gates."
+  applies_to: asop
+  testable: true
+  violation: "A preflight that checks nothing reports green."
+- id: A149
+  section: "3.9"
+  rule: "A rework edge targets an earlier step on a later step's gate failure, or an upstream procedure on a declared outcome no hand-off fires on; it declares `max_rounds` 1..3 and `consumes_attempt`; one edge per trigger; `findings` is a declared output."
+  applies_to: asop
+  testable: true
+  violation: "An unbounded loop, or a run that sends the same work forward and back."
+- id: A150
+  section: "3.9"
+  rule: "A rework edge whose rounds are spent escalates; it never runs another round."
+  applies_to: rework
+  testable: true
+  violation: "A rework loop runs a fourth autonomous round."
+- id: A151
+  section: "3.9"
+  rule: "A procedure rework re-files the owner as its next attempt with the inputs it had and the findings as prior-findings context; without an owner it is refused."
+  applies_to: rework
+  testable: true
+  violation: "The owner is re-filed with different inputs, without the findings, or a rework with no owner files something."
+- id: A152
+  section: "3.9"
+  rule: "At activation a rework target is upstream (it hands off, transitively, to the record); rework edges are excluded from the hand-off cycle check."
+  applies_to: asop
+  testable: true
+  violation: "A rework edge reaches a procedure downstream, escaping the cycle ban."
+- id: A153
+  section: "3.10"
+  rule: "A pinned chain resolves every procedure it can reach once, at its start, one version per procedure; a chain that cannot be pinned whole is refused at its start."
+  applies_to: manifest
+  testable: true
+  violation: "A chain starts with a member it can never file."
+- id: A154
+  section: "3.10"
+  rule: "Under a manifest a reference resolves only to the pinned version, and only if that version satisfies the reference."
+  applies_to: handoff
+  testable: true
+  violation: "A pinned chain files the version active now instead of the one it pinned."
+- id: A155
+  section: "3.10"
+  rule: "An adoption records the two manifest digests, the computed impact (members and components) and a human adopter; any other record is refused."
+  applies_to: manifest
+  testable: true
+  violation: "A chain moves to a new checker with no recorded decision, or a hand-typed impact report omits it."
+- id: A156
+  section: "5.6"
+  rule: "A step's last journal entry decides its state; a step whose last entry is `started` was interrupted and resumes; `next` is the steps not done whose `after` are done."
+  applies_to: journal
+  testable: true
+  violation: "A crash reads as a failure, or a resume skips a step."
+- id: A157
+  section: "5.4"
+  rule: "Only failures classed `work` (or unclassified) count toward §5.4's budget; a crash, a `cannot_evaluate` and other fault classes do not."
+  applies_to: journal
+  testable: true
+  violation: "An environment fault escalates good work to a person."
+- id: A158
+  section: "5.7"
+  rule: "A run is stale when it read a changed artefact at a different digest; a question read while open is recorded with digest null, so writing its answer makes the run stale."
+  applies_to: staleness
+  testable: true
+  violation: "A late answer leaves the work built on its default standing."
+- id: A159
+  section: "5.8"
+  rule: "A chain is done when every latest attempt is done and its chain gate (if any) passed; failed when a latest attempt or the chain gate failed; open otherwise; procedures run at more than one version are reported."
+  applies_to: chain
+  testable: true
+  violation: "A chain is reported done while its chain-level check could not evaluate, or two versions are averaged into one row."

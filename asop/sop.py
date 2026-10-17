@@ -486,6 +486,10 @@ class ASOP:
     handoffs: list[dict] = field(default_factory=list)
     on_escalate: Optional[dict] = None
     requires: list[dict] = field(default_factory=list)
+    # v3.6, also optional and validated by `asop.chain`: preconditions the
+    # engine runs before a run may start (§3.8), and bounded rework (§3.9).
+    entry_gates: list[dict] = field(default_factory=list)
+    rework: list[dict] = field(default_factory=list)
 
     author: Optional[str] = None
     author_kind: Optional[str] = None
@@ -685,9 +689,12 @@ def validate_asop(payload: dict, *, asop_id: Optional[str] = None) -> dict:
         cleaned_inputs.append(rec_out)
     out["inputs"] = cleaned_inputs
 
-    # chaining: outcomes, outputs, handoffs, on_escalate, requires (§3.7)
+    # chaining: outcomes, outputs, handoffs, on_escalate, requires (§3.7),
+    # entry_gates and rework (§3.8, §3.9, v3.6)
     try:
-        out.update(validate_chain_fields(payload, asop_id=asop_id, input_names=seen))
+        steps_raw = payload.get("steps")
+        out.update(validate_chain_fields(payload, asop_id=asop_id, input_names=seen,
+                                         steps=len(steps_raw) if isinstance(steps_raw, (list, tuple)) else None))
     except ChainContractError as e:
         raise SopContractError(str(e)) from e
 

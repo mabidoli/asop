@@ -84,3 +84,39 @@ vectors:
     runs: [[conventions, 7, 1, true]]
     satisfied: true
     because: "a subject is compared as a string, as the natural key spells it"
+
+  # ---- v3.6 (§3.7) -------------------------------------------------------------
+  - id: rq-bound-approval-current
+    asserts: [A144]
+    requires: [{kind: human_approved, artefact: plan, binds_digest: true}]
+    approvals: {plan: {digest: "sha256:aa"}}
+    digests: {plan: "sha256:aa"}
+    satisfied: true
+
+  - id: rq-bound-approval-stale
+    asserts: [A144]
+    requires: [{kind: human_approved, artefact: plan, binds_digest: true}]
+    approvals: {plan: {digest: "sha256:aa"}}
+    digests: {plan: "sha256:bb"}
+    satisfied: false
+    because: "the plan changed after the approval; it approved something else"
+
+  - id: rq-bound-approval-name-only-fails-closed
+    asserts: [A144]
+    requires: [{kind: human_approved, artefact: plan, binds_digest: true}]
+    approved: [plan]
+    satisfied: false
+    because: "a name cannot prove which version was approved"
+
+  - id: rq-chain-gate-passed
+    asserts: [A145]
+    requires: [{kind: chain_gate, id: traced, gate: {kind: deterministic, check: "trace --ledger"}}]
+    chain_gates: {traced: passed}
+    satisfied: true
+
+  - id: rq-chain-gate-cannot-evaluate-holds
+    asserts: [A145]
+    requires: [{kind: chain_gate, id: traced, gate: {kind: deterministic, check: "trace --ledger"}}]
+    chain_gates: {traced: cannot_evaluate}
+    satisfied: false
+    because: "a chain gate that could not read the ledger proved nothing"

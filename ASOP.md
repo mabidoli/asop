@@ -5,9 +5,11 @@
 > other than the one that did the work, and revised from the evidence its own
 > runs produce.*
 
-**Status:** v3.5. v3's review questions (§11) stand as decided on 2026-09-04, except
+**Status:** v3.6. v3's review questions (§11) stand as decided on 2026-09-04, except
 §11.4, which was reversed on 2026-10-10 by the hand-offs of §3.7. v3.1 through v3.4 are
-corrections; v3.5 is additive ([`CHANGELOG.md`](CHANGELOG.md)).
+corrections; v3.5 and v3.6 are additive ([`CHANGELOG.md`](CHANGELOG.md),
+[`MIGRATION.md`](MIGRATION.md)). Every v3.6 behaviour is opt-in by declaration: a v3.5
+record, gate or engine means exactly what it meant.
 Supersedes v2.
 **Home:** this repository — the specification, its normative [schema](schema/v1/), its
 [conformance vectors](conformance/) and a reference implementation. Distributed as
@@ -211,8 +213,34 @@ unchanged. It has three groups:
 | group | fields | notes |
 |---|---|---|
 | core | `kind`, `check` **or** `checks[]` | `checks` is a staged ladder; a failure names the stage. `class` is accepted as a read-alias of `kind` for records written before the schema was unified |
-| clock | `max_park_seconds`, `on_timeout` (`pass` \| `fail` \| `escalate`), `escalate_to`, `verifier` | all-or-nothing as a group. A `human` gate must name its `verifier`; a `deterministic` gate must not |
-| execution | `cwd`, `timeout_s`, `rubric`, `judge_route` | hints to the executing domain |
+| clock | `max_park_seconds`, `on_timeout` (`pass` \| `fail` \| `escalate` \| `proceed_on_default`), `escalate_to`, `verifier`, `default` | all-or-nothing as a group. A `human` gate must name its `verifier`; a `deterministic` gate must not |
+| execution | `cwd`, `timeout_s`, `rubric`, `judge_route`, `cannot_evaluate_exit`, `min_cases` | hints to the executing domain; the last two are the third outcome (below) |
+
+**The third outcome** *(v3.6)*. A check that could not judge the work is not a check
+that judged it wrong, and neither is one that passed. A long chain observed in
+practice escalated more often for this than for anything the work did: a test suite
+that collected nothing on a clean machine exited 0 or 1 according to its runner, and
+was read as a pass or charged to the executor. Two optional fields name the case:
+
+- `cannot_evaluate_exit` (1..255, 3 by convention): that exit status is
+  `cannot_evaluate`;
+- `min_cases` (≥ 1): an exit 0 that ran fewer cases is `cannot_evaluate`. The
+  attestation then carries `cases_run`, because an exit status alone cannot tell a
+  green suite from an empty one.
+
+Both are for `deterministic` gates only. `cannot_evaluate` never releases dependents
+and is never charged to the executor (§5.2, §5.4); what happens next is §3.8's. A gate
+declaring neither field has exactly the two outcomes it had in v3.5, so no existing
+gate changes meaning.
+
+**Non-blocking human gates** *(v3.6)*. `on_timeout: proceed_on_default` lets a `human`
+gate's question stop blocking the chain: when the clock expires, the step is `done` on
+its declared `default` — `{option, consequence, audience}`, each required. The engine
+records the default as taken and what was built on it, and a later answer is an input
+like any other (§5.7): if it differs, everything built on the default is stale. A
+default with no consequence or no audience is a decision nobody owns, so it is
+refused. Deterministic and judged gates may not proceed on a default: a check that did
+not run did not pass.
 
 Whether the clock group is mandatory is a caller decision (`require=("clock",)`): a
 coordination plane requires it, because a parked gate it cannot expire is a queue it
@@ -474,6 +502,42 @@ requires:
 The kinds are a **closed list**. A predicate two engines evaluate differently is a fork of
 the contract, so the list grows by spec version, never by author.
 
+**Generated plans** *(v3.6)*. A procedure that writes a plan — a list of tasks with
+dependencies, which a person approves in part — is how a fan-out's count gets decided
+in practice, and v3.5 could fan it out but not keep its order or its approval. Three
+optional fields on `subject_from`:
+
+- `order_by: <field>` names the item field that lists the subjects it depends on. Each
+  filed run carries `depends_on`, the natural keys of those runs, and may **start** only
+  when they are all done (`fanout_startable`). A dependency the hand-off does not file,
+  or a cycle, refuses the hand-off (`order`) and blocks its join. When it is the
+  **requests** that narrowed the fan-out into an order it cannot keep, the requests are
+  refused and the declaration files: a refused request is still as if it had not been
+  written.
+- `concurrency: N` bounds how many of the fan-out's runs run at once. Running runs hold
+  their slot; a failed dependency never frees its dependents, and the join over the
+  fan-out is what reaches a person.
+- `approved_subset: true` files only subjects a person approved, in an approval
+  (`asop.approval/1`, [schema](schema/v1/approval.yaml)) that binds the output's
+  **current digest**. A missing approval, an approval of an earlier digest, or one
+  naming a subject the output does not contain refuses the hand-off (`approval`).
+  Approving a task without its prerequisite is refused as `order`.
+
+`requires` gains, by the same closed-list rule:
+
+- `human_approved` takes an optional `binds_digest: true`: the approval holds only
+  while its digest is the artefact's current one. A name alone fails closed.
+- `chain_gate` — `{kind: chain_gate, id, gate}` — a deterministic gate the engine runs
+  over the chain's run ledger; it holds only when it `passed`. This is chain-level done
+  (§5.8): a terminal procedure requires it, and cannot start on a chain whose ledger
+  says it is not done.
+
+A hand-off may declare `preflight: true`: the engine runs the target's entry gates
+(§3.8) against this run's would-be filings before the run is recorded done, so a
+defect fails the producer that made it instead of surfacing hours later as the
+consumer's failure. Activation refuses a preflight against a target with no entry
+gates.
+
 **Escalation.** `on_escalate` names the procedure that §5.4's second failure files. If it
 is absent, the gate's own `escalate_to` applies.
 - **Target.** It must contain a step a human role does, because an escalation reaches a
@@ -503,6 +567,10 @@ flow:
   come from the parent, so this is the only lineage that shows it depends on those runs,
   and staleness needs it.
 - **Re-evaluating** waiting joins and `requires` whenever a run in the chain finishes.
+- **Escalation context** *(v3.6)* SHOULD carry `fault_class` (§5.4) and `audience`: who
+  the question is for. Most escalations in a long chain observed in practice were about
+  the machine, not the work, and an escalation that does not say so reaches the wrong
+  person.
 - **Liveness.** A blocked join, or a run whose `requires` have not held within the
   engine's bound, is surfaced to a person. The bound is engine configuration.
 
@@ -510,6 +578,10 @@ flow:
 reader **refuses** a record that declares hand-offs. That is deliberate: a reader that
 dropped the hand-offs it did not understand would run the procedure as a dead end. Adopt
 `asop-spec` 0.5.0 before accepting chained records. A v3.4 record is a valid v3.5 record.
+The same holds one version on *(v3.6)*: a record declaring `entry_gates`, `rework`, or
+one of §3.7's v3.6 fields is refused by a 0.5.0 reader, which would otherwise run the
+procedure without its precondition or its loop bound. Adopt `asop-spec` 0.6.0 before
+accepting them. A v3.5 record is a valid v3.6 record, and means the same thing.
 
 The reference implementation is `asop.chain`. Every function is pure:
 - `validate_chain_fields` checks one record.
@@ -520,9 +592,152 @@ The reference implementation is `asop.chain`. Every function is pure:
 - `join_state` decides whether a waiting join is `wait`, `ready` or `blocked`.
 - `plan_join` files a join once it is ready.
 - `requires_satisfied` makes the start decision.
+- *(v3.6)* `fanout_startable` decides which runs of an ordered fan-out may start;
+  `plan_entry` and `preflight_checks` are §3.8's; `plan_rework` is §3.9's;
+  `asop.manifest` is §3.10's; `asop.journal` is §5.6–§5.8's.
 
 All of them are pinned by the conformance vectors in `chain-record.yaml`, `handoff.yaml`,
 `join.yaml` and `requires.yaml`.
+
+### 3.8 Entry gates — the hand-off gate and the readiness gate *(v3.6)*
+
+A step's gate checks the step's own output. In a chain, the failures that cost most
+were the ones where a producer's output had the shape its own gate checked and not the
+shape its consumer needed: a plan listed as environment needs the objects its tasks
+would create, and the defect surfaced as a build failure hours later, then as an
+escalation. v3.5's declared `outputs` named what flows down a chain; nothing checked it
+from the consumer's side.
+
+```yaml
+entry_gates:
+  - id: task-buildable
+    over: [task]                         # declared inputs only
+    gate: {kind: deterministic, check: "lint-task", cannot_evaluate_exit: 3}
+  - id: source-ready                     # a readiness gate: same shape, over a source
+    over: [source]
+    gate: {kind: deterministic, check: "check-source --final --approver --no-open-decisions",
+           cannot_evaluate_exit: 3}
+```
+
+- An entry gate is **deterministic**, reads only **declared inputs**, and is run by the
+  engine before a filed run may start. It is never a step and never charged to the
+  consumer: a run that did not start did not fail.
+- The decision (`plan_entry`) is `start` when every entry gate passed, `wait` while one
+  has not run, and otherwise `not_ready`:
+  - over an input a **predecessor** handed on, the producer is **re-filed** as its next
+    attempt. A `cannot_evaluate` charges nobody; a `failed` is charged to the
+    **producer** (§5.4), whose output broke the contract;
+  - over a **source** — an input supplied at chain start — there is no producer in the
+    chain, so the run is **held** for a person (`source_not_ready`, `source_rejected`).
+    That is the readiness gate: "the source document is final, names its approver, and
+    has no open decisions" is a deterministic check over the document, evaluated
+    before the procedure may start.
+- Dependents are never released by an entry gate that did not pass.
+- **Readiness is recorded and has lineage.** The engine records each entry gate's
+  verdict with the digests of the inputs it read, and a change of one makes the verdict
+  stale (§5.7). A source that changes after it was found ready is re-evaluated, and
+  runs built on the old one are stale.
+- **The producer's obligation.** A producer whose hand-off declares `preflight: true`
+  runs the consumer's entry gates as part of finishing (§3.7, `preflight_checks`).
+
+### 3.9 Rework — declared, bounded loops *(v3.6)*
+
+v3.5 refuses hand-off cycles and allows a loop only through an escalation, because a
+person bounds it. Real chains loop without a person, for good reasons: tests that do
+not bite go back to the step that wrote them; a review's findings go back to the
+procedure that owns them. Those loops lived in engine code, which is the portability
+failure §3.7 was written to fix. A `rework` edge declares one, and bounds it.
+
+```yaml
+rework:
+  - id: rewrite-tests                    # back to an earlier STEP of this procedure
+    to: {step: 1}
+    on_step_failure: 3                   # when step 3's gate fails
+    max_rounds: 2
+    consumes_attempt: false
+  - id: replan                           # back to the upstream PROCEDURE that owns a finding
+    to: {asop_id: plan, versions: ">=1"}
+    on_outcomes: [PLAN_FINDINGS]         # a declared outcome no hand-off fires on
+    findings: findings                   # a declared output, carried as prior findings
+    max_rounds: 2
+    consumes_attempt: false
+    tier_bump: true
+```
+
+- **A step edge** re-executes steps `to.step` through `on_step_failure` (which must be
+  later) instead of repairing the failing step alone. A failing step re-running itself
+  is §5.4's repair, not rework.
+- **A procedure edge** fires when this run finishes with one of `on_outcomes`, which
+  must be declared and must not be an outcome any hand-off fires on: a run that sends
+  its work back does not also send it forward. It re-files the **owner** — the upstream
+  run of the target in this chain, which the engine finds by lineage — as its next
+  attempt with the **same inputs**, plus `findings` as **prior findings**: run context
+  outside its declared inputs, a scalar reference like every value handed on. This is
+  the one mechanism for "re-file the exhausted owner with the review's findings"; there
+  is no second one.
+- **Bounded.** `max_rounds` is 1..3, counted per edge per chain. A spent edge
+  **escalates** (§5.4); it never runs another round. `consumes_attempt` is required and
+  has no default: whether a round spends the repair budget is the author's decision.
+- `tier_bump: true` lets the engine bind the re-run's roles to a more capable binding.
+  What "more capable" means is a binding, so it is local (§7).
+- **One trigger, one edge.** Two edges on one outcome, or on one failing step, are
+  refused: which owner is re-filed must not depend on order.
+- **Upstream only.** At activation, a procedure edge's target must (transitively) hand
+  off to this record. A rework edge to anything else is a hand-off by another name, and
+  would escape the cycle ban.
+- **Not part of the cycle check.** Rework edges are excluded from §3.7's acyclicity
+  check, as escalation edges are: `max_rounds` bounds them, as a person bounds an
+  escalation.
+- Refusals are `rework_refused:<rule>`: `undeclared`, `version`, `findings`, `owner`.
+
+The reference is `plan_rework`; the vectors are `rework.yaml`.
+
+### 3.10 The chain manifest and adoption *(v3.6)*
+
+v3.5 pins each run, and lets a hand-off name a version **range** resolved at filing. A
+chain that runs for days can then file its first procedures under one version and its
+last under another — and a gate's meaning moves with more than the step text. A long
+chain observed in practice moved under three clocks at once: its procedures, the
+checker its deterministic gates call, and the engine's own orchestration rules. A step
+pin without a checker pin is not a pin.
+
+**A chain manifest** (`asop.chain-manifest/1`, [schema](schema/v1/chain-manifest.yaml))
+is written when a chain starts:
+
+```yaml
+{schema: asop.chain-manifest/1, chain: C1,
+ start: {asop_id: intake, version: 1},
+ members: [{asop_id: extract, version: 2, digest: "sha256:…"}, {asop_id: intake, version: 1, digest: "sha256:…"}],
+ components: [{name: checker, version: "29", digest: "sha256:…"}, {name: rules, digest: "sha256:…"}]}
+```
+
+- **Resolved once.** At chain start, every procedure the chain can reach — through
+  hand-offs, joins, its escalation target and its rework targets — resolves to the
+  ACTIVE version inside its reference, and is pinned. One version per procedure. A
+  chain that cannot be pinned whole is refused **at its start**, not at a filing hours
+  later.
+- **Resolved from the pin.** For the rest of the chain, every reference resolves to
+  the pinned version, and only if that version satisfies the reference; there is no
+  fallback to what is active now. In the reference implementation this is just a
+  resolver (`manifest_resolver`): `plan_handoffs`, `plan_join`, `plan_escalation` and
+  `plan_rework` are unchanged.
+- **Components** are whatever else gives the gates their meaning — a checker, a rules
+  file — by digest. Their meaning is local; that they are pinned is not.
+- **Adoption.** A chain moves to another manifest only by an **adoption**
+  (`asop.adoption/1`, [schema](schema/v1/adoption.yaml)) that a declared human records:
+  the two manifests' digests, and the impact report — one row per member and
+  component, `unchanged`, `changed`, `added` or `removed` — **computed** from the two
+  manifests (`adoption_impact`), never typed. In-flight runs finish under the version
+  they started under (§2.1); runs filed after the adoption resolve from the new
+  manifest. Using an unpinned version without one is `adoption_required`.
+- **Digests.** A manifest's digest is sha256 over its canonical JSON (sorted keys, no
+  whitespace, UTF-8); nothing in a manifest is a float, so this is RFC 8785's result
+  too. A member's digest is the store's, and engines compare the strings.
+
+**Opt-in, deliberately.** An engine that starts chains without a manifest is the v3.5
+engine it always was, resolving ranges at filing, and conforms to v3.6; it does not get
+to claim it pins chains. Making the manifest mandatory would make every v3.5 engine
+non-conforming, which is not an additive change; it is a candidate for v4 (§11.10).
 
 ---
 
@@ -595,7 +810,8 @@ that owns the bead runs the gate at its own status flip:
 | passed | `done` | yes |
 | `deterministic` / `judged` failed | `verify_failed` | **no** |
 | `human` parked | `awaiting_verify` | **no** |
-| park clock expired | per `on_timeout`: `done` / `verify_failed` / escalated | as above |
+| could not evaluate *(v3.6, §3.3)* | `cannot_evaluate` — not charged; whatever could not be evaluated is re-filed or held (§3.8) | **no** |
+| park clock expired | per `on_timeout`: `done` / `verify_failed` / escalated / `done` on the declared default *(v3.6)* | as above |
 
 Neither `verify_failed` nor `awaiting_verify` releases anything downstream. This kills
 the momentarily-done race.
@@ -650,6 +866,20 @@ its own gate is re-run and passes. Repair is a sibling **repair bead** (`repairs
 budget: the red original is what holds the parent open. First failure files one repair
 bead; second failure escalates to a human; there is no third autonomous attempt.
 
+**What counts** *(v3.6)*. The budget counts the executor's failures, and only those:
+
+- a `failed` journal entry whose `fault_class` is `work`, or that has none, counts —
+  an engine that classifies nothing charges every failure, exactly as before;
+- `environment`, `checker`, `handoff` and `decision` faults do not: the machine could
+  not run the work, the checker judged it wrongly, an input arrived broken, or only a
+  person can answer. They go to whoever owns them (the escalation's `audience`), not
+  into the executor's budget;
+- a crash is not an attempt (§5.6), and `cannot_evaluate` is not a failure (§3.3).
+
+The fault classes are a closed list: `work`, `environment`, `checker`, `handoff`,
+`decision` (`asop.journal.FAULT_CLASSES`). A rework round (§3.9) counts when its edge
+declares `consumes_attempt: true`.
+
 ### 5.5 Completion
 
 The run's parent bead closes when every step bead is `done`. At that moment:
@@ -660,6 +890,69 @@ The run's parent bead closes when every step bead is `done`. At that moment:
 - open adjudications on the run are queued for the lessons pass (§6);
 - the ASOP's hand-offs are evaluated against the recorded outcome and outputs, and
   whatever they file is ledgered with this run as its parent (§3.7).
+
+### 5.6 Journal and resume *(v3.6)*
+
+§6.2 already says the plan-vs-actual review is written "at the moment that step
+completes". A long chain observed in practice wrote its steps to the ledger in one batch
+when the run ended, and three things followed: step timings were artefacts of the flush,
+a value one step wrote for the next was missing when the next step looked, and an
+executor that died mid-run left no entry, so its crash read as a failure and was
+charged as one.
+
+- **Append per step.** The engine appends a journal entry (`asop.step-journal/1`,
+  [schema](schema/v1/step-journal.yaml)) when a step starts and when it ends — `passed`,
+  `failed`, `cannot_evaluate`, `parked`, `done_on_default` or `escalated` — with the
+  digests of the outputs it wrote. Never in a batch at the end of the run.
+- **Resume from the journal alone.** After a restart, each step's **last** entry decides
+  it (`resume_point`). A step whose last entry is `started` was interrupted: it is
+  re-run under a new lease. The probe needs no transcript and no executor memory; if it
+  did, a run would be resumable only by the process that died.
+- **A crash re-file is not an attempt.** The lease attempt (§5.2) increments, because
+  that is fencing; §5.4's budget does not, because an interrupted step reached no gate
+  (`charged_failures`).
+
+### 5.7 Staleness — answers, sources and approvals are inputs *(v3.6)*
+
+§3.7 made staleness an engine duty and left its rule implicit. v3.6 states it once, so
+two engines agree on it: **a run is stale when it read an artefact that has since
+changed, at a different digest** (`stale_runs`). The engine records what each run read,
+with digests, and a stale run is re-filed as its next attempt; a re-attempted parent
+files its fan-out afresh, which is how staleness reaches the runs below it.
+
+The one rule covers four cases:
+
+- a predecessor's **output** that was rewritten;
+- a **source** whose readiness was evaluated (§3.8): the verdict is lineage, and a
+  changed source makes it stale;
+- an **approval** (§3.7): it binds a digest, and an artefact that changed after it was
+  approved was not approved;
+- a person's **answer**. An answer to an escalation or a question is an input artefact
+  of everything derived from it. A run built while the question was open — on its
+  declared default (§3.3) or on nothing — records the question with digest `null`.
+  Writing the answer changes it, so every run built on the open question is stale and
+  is re-filed. An answer that matches what was built on changes nothing. An answer is
+  an input, not a comment.
+
+### 5.8 The chain outcome and chain-level done *(v3.6)*
+
+Outcomes attach to versions (§2.1), and a version is a procedure's. The chain is what an
+owner pays for and approves, and nothing recorded its outcome: a long chain observed in
+practice ran for most of a day without finishing a single task, and that was visible
+only to someone who added the ledger up by hand.
+
+- **Chain-level done** is a `chain_gate` requirement (§3.7) on a terminal procedure: a
+  deterministic gate over the run ledger — every requirement traced to evidence, say —
+  that holds only when it `passed`.
+- **The chain outcome record** (`asop.chain-outcome/1`,
+  [schema](schema/v1/chain-outcome.yaml)) is computed from the ledger
+  (`chain_outcome`), never typed: wall time, spend, human wait, runs and superseded
+  runs, failures and escalations by fault class, escalations by audience, the member
+  versions used, and the verdict. `done` when every latest attempt is done and the chain
+  gate, if any, passed; `failed` when a latest attempt or the chain gate failed; `open`
+  otherwise. A procedure run at more than one version is listed in `mixed_versions` —
+  the condition a manifest prevents, and one an outcome row must never average away.
+- It is the chain's row in `outcomes_by_version` (§6.3), keyed by its manifest digest.
 
 ---
 
@@ -702,7 +995,11 @@ same boundary. A draft, never an activation.
 
 `outcomes_by_version` is the other half: per version and per step, counts of `done`,
 `verify_failed`, escalations, repairs, mean park time. Whether a revision helped is a
-comparison of two rows.
+comparison of two rows. *(v3.6)* It gains a **chain row** per manifest digest — the
+chain outcome record of §5.8 — and its counts read fault classes (§5.4), so a version
+is not blamed for its environment. A defect class that recurs at a hand-off is evidence
+for an entry gate or a preflight (§3.8), which is a structural proposal like a step
+split.
 
 ### 6.4 Revision policy
 
@@ -898,6 +1195,11 @@ to one.
 | `run_list(asop_id?, status?)` | any | — | runs, newest first | — |
 | `drifted(run_id)` | any | — | whether the pinned version is no longer active | — |
 | `handoff(run_id, requests?)` *(v3.5)* | the engine that owns the run | run complete | files what §3.7 decides; records each filing, duplicate and refusal with the run as parent | `handoff_refused:<rule>` |
+| `chain_start(asop_id, inputs)` *(v3.6)* | human or agent | as `run`; every reachable member pinnable | pins the chain manifest (§3.10), then files the first run as `run` does | as `run`, `sop_refused` |
+| `chain_adopt(chain, manifest)` *(v3.6)* | a declared human | the chain has a manifest | records an adoption with the computed impact; later filings resolve from the new manifest | `revision_policy:human_only`, `sop_refused` |
+| `rework(run_id, trigger)` *(v3.6)* | the engine that owns the run | a declared edge matches | re-runs steps, re-files the owner, or escalates when the rounds are spent (§3.9) | `rework_refused:<rule>` |
+| `answer(question, answer)` *(v3.6)* | a declared human | the question exists | records the answer as an artefact; everything built on the open question is stale (§5.7) | `unauthenticated` |
+| `resume(run_id)` *(v3.6)* | the engine that owns the run | — | re-runs interrupted steps from the journal; not an attempt (§5.6) | `not_the_owner` |
 
 ### 8.3 Executing
 
@@ -1020,7 +1322,9 @@ stack trace. Codes relevant to ASOPs, from `asop.refusals`, plus the ones v3 add
 | **`inputs_missing`** *(v3)* | a declared run input was not supplied |
 | **`role_unbound`** *(v3)* | no binding for a role |
 | **`constraint_unsatisfiable`** *(v3)* | every binding violates a `distinct` constraint |
-| **`handoff_refused:<rule>`** *(v3.5)* | a finished run's hand-off or filing request was refused; the rule is one of §3.7's nine |
+| **`handoff_refused:<rule>`** *(v3.5)* | a finished run's hand-off or filing request was refused; the rule is one of §3.7's nine, or *(v3.6)* `order` or `approval` |
+| **`rework_refused:<rule>`** *(v3.6)* | a declared rework edge could not be applied: `undeclared`, `version`, `findings` or `owner` (§3.9) |
+| **`adoption_required`** *(v3.6)* | a chain run would use a version or component its manifest does not pin; moving needs a recorded adoption (§3.10) |
 
 ---
 
@@ -1118,6 +1422,14 @@ stack trace. Codes relevant to ASOPs, from `asop.refusals`, plus the ones v3 add
    where an embedded plane fetches the version a journalled run names. Both need the
    revision policy (§6.4) to hold across the hop, and neither is decided.
 
+10. **Candidates for v4.** **OPEN (v3.6).** v3.6 is additive, so each of these was
+    left out because it would change what an existing record, gate or engine means. The
+    list, with reasons, is in [`MIGRATION.md`](MIGRATION.md#candidates-for-v4): making the
+    chain manifest mandatory (so a v3.5 engine resolving at filing stops conforming);
+    `cannot_evaluate` for every deterministic gate's exit 3 without a declaration;
+    judged entry gates; normative `inputs[].kind` / `outputs[].kind`; declared
+    per-step capabilities and environments; and run-instance identity across machines.
+
 ---
 
 ## 12. What an ASOP is not
@@ -1126,7 +1438,8 @@ stack trace. Codes relevant to ASOPs, from `asop.refusals`, plus the ones v3 add
 - **Not a workflow engine.** The ASOP executes nothing; harnesses do.
 - **Not an orchestrator.** An ASOP does not decide which procedure a situation calls
   for, and it runs nothing. Since v3.5 it *declares* where a finished run may hand off
-  (§3.7), and the engine decides whether to file, refusing anything undeclared.
+  (§3.7), and since v3.6 where it may send work back (§3.9) and what it checks before
+  it starts (§3.8); the engine decides, refusing anything undeclared.
   Composition *inside* one procedure is nesting. Starting a chain, concurrency,
   staleness and retries stay in the harness.
 - **Not a straitjacket.** Divergence is expected and metabolised, not forbidden.
@@ -1158,6 +1471,13 @@ stack trace. Codes relevant to ASOPs, from `asop.refusals`, plus the ones v3 add
 | **chain** | the runs one starting run leads to through hand-offs; the scope of `requires` and of the natural key |
 | **join** | a hand-off with `after`: filed once, when every run the listed hand-offs of the same parent run filed is done (§3.7) |
 | **filing request** | a finished run's own choice of which declared hand-offs and subjects to file; it carries no inputs |
+| **entry gate** | a consumer's deterministic precondition over declared inputs, run before a filed run may start; over a source it is a **readiness gate** (§3.8) |
+| **cannot_evaluate** | the third gate outcome: the check could not judge the work. Never releases dependents, never charged (§3.3) |
+| **rework edge** | a declared, bounded loop back to an earlier step or to the upstream owner of a finding (§3.9) |
+| **chain manifest** | the one pin a chain resolves from: its members' versions and the components that give its gates meaning (§3.10) |
+| **adoption** | a person's recorded move of a chain to another manifest, with a computed impact report (§3.10) |
+| **chain outcome** | the chain-level record computed from the ledger, and the chain's row in `outcomes_by_version` (§5.8) |
+| **fault class** | why something failed: `work`, `environment`, `checker`, `handoff`, `decision`. Only `work` is charged (§5.4) |
 | **plane** | a coordination layer storing ASOPs and outcomes across harnesses |
 | **harness** | a runtime that executes beads; runs alone or reports to a plane |
 
@@ -1173,4 +1493,9 @@ cross-validation of the CONCEPT (not any one implementation) against ~30 prior d
 notes spanning three independent builds of this contract in one week — every one of the
 three had separately shipped "declared, never inferred" with no authentication behind it,
 and one had separately documented, in its own words, that its "distinct verifier" check
-proved a name looked, not that judgment was exercised.*
+proved a name looked, not that judgment was exercised. v3.6 drafted 2026-10-16 from a real run
+of a sixteen-procedure chain — hours per work item, tens to hundreds of agent steps, and
+a defect registry of about a hundred classes — whose costliest failures were not in any
+step's prose: they were gates that could not evaluate and passed or were charged, loops
+and pins that lived only in engine code, defaults nobody saw, and a chain whose outcome
+nobody recorded.*

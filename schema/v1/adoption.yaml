@@ -1,0 +1,61 @@
+# =============================================================================
+# Adoption — a recorded human decision to move a running chain to another
+# manifest (ASOP.md §3.10, v3.6).
+#
+# JSON Schema draft 2020-12, authored in YAML. `impact` is computed from the
+# two manifests (asop.manifest.adoption_impact), never typed: a hand-written
+# impact report is the one that leaves out the checker. `from` and `to` are the
+# manifests' digests; whether they match the manifests, and whether
+# `adopted_by` is a declared human (§6.4), are cross-record rules enforced where
+# the adoption is recorded.
+# =============================================================================
+
+$id: https://raw.githubusercontent.com/mabidoli/asop/main/schema/v1/adoption.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Adoption
+type: object
+additionalProperties: false
+required: [schema, chain, from, to, adopted_by, adopted_at, impact]
+properties:
+  schema:
+    const: asop.adoption/1
+  chain: {$ref: '#/$defs/exactName'}
+  from: {$ref: '#/$defs/digest'}
+  to: {$ref: '#/$defs/digest'}
+  adopted_by:
+    $ref: '#/$defs/exactName'
+    description: A declared human. An agent may propose an adoption; only a person records one.
+  adopted_at:
+    type: string
+    format: date-time
+  reason:
+    type: string
+    pattern: '\S'
+  impact:
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required: [kind, name, from, to, effect]
+      properties:
+        kind: {enum: [member, component]}
+        name: {$ref: '#/$defs/exactName'}
+        from: {$ref: '#/$defs/pin'}
+        to: {$ref: '#/$defs/pin'}
+        effect: {enum: [unchanged, changed, added, removed]}
+$defs:
+  pin:
+    oneOf:
+      - type: 'null'
+      - type: object
+        additionalProperties: false
+        required: [digest]
+        properties:
+          version: {type: [integer, string]}
+          digest: {$ref: '#/$defs/digest'}
+  digest:
+    type: string
+    pattern: '^sha256:[0-9a-f]{64}$'
+  exactName:
+    type: string
+    pattern: '^\S([\s\S]*\S)?$'

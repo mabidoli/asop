@@ -1,0 +1,64 @@
+# =============================================================================
+# Chain outcome — what a whole chain cost and whether it is done
+# (ASOP.md §5.8, v3.6).
+#
+# JSON Schema draft 2020-12, authored in YAML. Computed from the run ledger
+# (asop.journal.chain_outcome), never typed. It is the chain's row in
+# `outcomes_by_version` (§6.3), keyed by its manifest digest: per-procedure rows
+# say whether a step got better, and only this row says whether the chain an
+# owner paid for got done.
+# =============================================================================
+
+$id: https://raw.githubusercontent.com/mabidoli/asop/main/schema/v1/chain-outcome.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Chain outcome
+type: object
+additionalProperties: false
+required: [schema, chain, verdict, wall_seconds, spend, human_wait_seconds, runs, superseded,
+           failures_by_class, escalations_by_class, escalations_by_audience, members, mixed_versions]
+properties:
+  schema:
+    const: asop.chain-outcome/1
+  chain: {type: string, pattern: '^\S([\s\S]*\S)?$'}
+  manifest:
+    type: string
+    pattern: '^sha256:[0-9a-f]{64}$'
+    description: The chain's manifest digest, when it was pinned (§3.10).
+  verdict:
+    enum: [done, open, failed]
+    description: >-
+      done: every latest attempt is done and the chain gate, if any, passed.
+      failed: a latest attempt or the chain gate failed. open: otherwise.
+  chain_gate:
+    enum: [passed, failed, cannot_evaluate, incomplete]
+  started_at: {type: string, format: date-time}
+  ended_at: {type: string, format: date-time}
+  wall_seconds: {type: [integer, 'null'], minimum: 0}
+  spend: {type: number, minimum: 0}
+  spend_unit: {type: string, pattern: '\S'}
+  human_wait_seconds: {type: number, minimum: 0}
+  runs: {type: integer, minimum: 0}
+  superseded: {type: integer, minimum: 0}
+  failures_by_class: {$ref: '#/$defs/counts'}
+  escalations_by_class: {$ref: '#/$defs/counts'}
+  escalations_by_audience: {$ref: '#/$defs/counts'}
+  members:
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required: [asop_id, version, runs, done, failed]
+      properties:
+        asop_id: {type: string}
+        version: {type: integer, minimum: 1}
+        runs: {type: integer, minimum: 0}
+        done: {type: integer, minimum: 0}
+        failed: {type: integer, minimum: 0}
+  mixed_versions:
+    type: array
+    items: {type: string}
+    description: Procedures the chain ran at more than one version — what a manifest prevents.
+$defs:
+  counts:
+    type: object
+    additionalProperties: {type: integer, minimum: 0}

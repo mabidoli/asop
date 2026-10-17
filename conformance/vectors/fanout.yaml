@@ -1,0 +1,65 @@
+# Conformance vectors — which runs of an ordered fan-out may START now? (§3.7, v3.6)
+#
+# `filed` lists what one fan-out filed, in filing order, as [natural key,
+# [natural keys it depends on]]. `started` holds runs that have started
+# (running or finished) and `done` those finished done. `concurrency` is the
+# hand-off's bound, absent for none. `startable` is the answer, in filing order.
+
+artifact: fanout
+x-filed: &filed
+  - ["R1|build|T1|a1", []]
+  - ["R1|build|T2|a1", ["R1|build|T1|a1"]]
+  - ["R1|build|T3|a1", ["R1|build|T1|a1"]]
+  - ["R1|build|T4|a1", ["R1|build|T2|a1", "R1|build|T3|a1"]]
+vectors:
+  - id: fo-roots-first
+    asserts: [A142]
+    filed: *filed
+    startable: ["R1|build|T1|a1"]
+
+  - id: fo-dependents-after-done
+    asserts: [A142]
+    filed: *filed
+    started: ["R1|build|T1|a1"]
+    done: ["R1|build|T1|a1"]
+    startable: ["R1|build|T2|a1", "R1|build|T3|a1"]
+
+  - id: fo-started-is-not-done
+    asserts: [A142]
+    filed: *filed
+    started: ["R1|build|T1|a1"]
+    startable: []
+    because: "a dependency that is running is not finished"
+
+  - id: fo-concurrency-bounds-the-wave
+    asserts: [A142]
+    filed: *filed
+    concurrency: 1
+    started: ["R1|build|T1|a1"]
+    done: ["R1|build|T1|a1"]
+    startable: ["R1|build|T2|a1"]
+
+  - id: fo-running-runs-count-against-the-bound
+    asserts: [A142]
+    filed: *filed
+    concurrency: 2
+    started: ["R1|build|T1|a1", "R1|build|T2|a1"]
+    done: ["R1|build|T1|a1"]
+    startable: ["R1|build|T3|a1"]
+
+  - id: fo-failed-dependency-never-starts-the-dependent
+    asserts: [A142]
+    filed: *filed
+    started: ["R1|build|T1|a1", "R1|build|T2|a1", "R1|build|T3|a1"]
+    done: ["R1|build|T1|a1", "R1|build|T3|a1"]
+    startable: []
+    because: "T2 started and never finished done; T4 waits, and the join over the fan-out is what reaches a person"
+
+  - id: fo-running-run-fills-the-only-slot
+    asserts: [A142]
+    filed: *filed
+    concurrency: 1
+    started: ["R1|build|T1|a1", "R1|build|T2|a1"]
+    done: ["R1|build|T1|a1"]
+    startable: []
+    because: "T3's dependencies are done, but T2 is still running and the bound is one"

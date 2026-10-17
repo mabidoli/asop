@@ -14,7 +14,7 @@ been implemented by anyone who did not also write it, which is the honest status
 and the thing I would most like to change.
 
 What exists to make that possible: a normative [schema](schema/v1/) as JSON
-Schema in YAML, and [39 conformance vectors](conformance/) as data, so an
+Schema in YAML, and [229 conformance vectors](conformance/) as data, so an
 implementation in any language can prove it conforms without depending on this
 package or reading a line of Python.
 
@@ -44,6 +44,9 @@ importing the other. This package is that agreement.
 | `asop.gates` | The unified gate schema. `validate_gate(payload, *, require=(), max_park_seconds_ceiling=None)` normalises a `deterministic` / `judged` / `human` gate — merging the plane's park-clock fields with the Harness's staged-check and runtime-hint fields into one shape — or refuses. `validate_attestation`, `attestation_passes`, `retry_decision` cover the evidence side. |
 | `asop.sop` | The SOP **record** contract: `SopStatus`, the `SOP` and `ASOP` dataclasses, `validate_fields` / `validate_asop` / `validate_step`. Not the store — keeping versions, locking a file, and filing runs from a template is plane- or harness-side machinery, layered on top of this record shape. |
 | `asop.revision` | The **revision policy** of [`ASOP.md` §6.4](ASOP.md): the four rules an agent reviser is bound by — protected tags, the human ratchet (absolute on a first activation), no-undoing-a-human, and the `human_only` verbs — plus the four operator declarations they read (`ASOP_HUMANS`, `ASOP_PROTECTED_TAGS`, `ASOP_VERIFIERS`, `ASOP_ADJUDICATORS`), each still falling back to its pre-split `AGENTCO_*` name for the two implementations that predate the split; whether that fallback is a permanent courtesy or gets a deprecation date is still open. Shared rather than plane-side because a rule that held on the plane and not in the runtime executing its work would be a rule with a door beside it. Which verb calls which rule stays each side's own wiring. |
+| `asop.chain` | Hand-offs between procedures ([`ASOP.md` §3.7](ASOP.md)): validating a record's chaining, the filing decision, joins, `requires`, escalation — and from v3.6 ordered and approved fan-outs, entry gates (§3.8) and rework edges (§3.9). Every function is pure. |
+| `asop.manifest` | *(v3.6)* The chain manifest (§3.10): pin every reachable procedure once at chain start, resolve from the pin, and move a chain only by a recorded adoption with a computed impact report. |
+| `asop.journal` | *(v3.6)* Per-step journaling and resume (§5.6), what §5.4's budget charges, the staleness rule (§5.7), and the chain outcome record (§5.8). |
 | `asop.refusals` | The refusal-code vocabulary — every machine-readable `code` a `Refusal` carries across the reference plane, named once with a one-line meaning, for a reader scanning codes rather than call sites. |
 
 ## The gate schema
@@ -65,7 +68,13 @@ Three field groups:
   but not both `max_park_seconds` and `on_timeout` is always refused,
   regardless of whether a caller requires the clock at all.
 - **execution** (the Harness's runtime hints) — `cwd`, `timeout_s`,
-  `rubric` (`judged` only), `judge_route` (`judged` only).
+  `rubric` (`judged` only), `judge_route` (`judged` only), and from v3.6
+  `cannot_evaluate_exit` and `min_cases` (`deterministic` only): the third
+  outcome, `cannot_evaluate`, which never passes and is never charged to the
+  executor. `gate_outcome` says which outcome evidence reaches.
+
+From v3.6 the clock group also takes `on_timeout: proceed_on_default` with a
+required `default: {option, consequence, audience}`, on `human` gates only.
 
 Whether the clock group is mandatory is the one thing that differs by
 caller, and the one knob `validate_gate` exposes: `require=("clock",)` is
@@ -79,6 +88,10 @@ Output is always fully normalised: every known field present (`None` where
 absent), plus `"schema_version": 1`.
 
 ## Versioning
+
+The specification is at **v3.6** and the package at **0.6.0**. v3.6 is additive: an
+adopter at 0.5.0 needs to change nothing, and [`MIGRATION.md`](MIGRATION.md) says what
+to adopt first and what was left for v4.
 
 `asop.SCHEMA_VERSION` covers the gate schema's normalised shape. It bumps
 only on a breaking change — a new required field, a renamed one, a changed
@@ -103,8 +116,8 @@ it is a framework wearing a standard's clothes.
 
 ## Testing
 
-    uv run --extra dev pytest -q                                         # 150 tests
-    uv run --with pyyaml python conformance/runner/python.py --verbose   # 61 vectors
+    uv run --extra dev pytest -q                                         # 353 tests
+    uv run --with pyyaml python conformance/runner/python.py --verbose   # 229 vectors
 
 `pytest` is a dev dependency, not a default one — a bare `uv run pytest` fails with
 "Failed to spawn: `pytest`" because nothing is installed to spawn; `--extra dev` is

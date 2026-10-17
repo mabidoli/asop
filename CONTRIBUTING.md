@@ -4,9 +4,9 @@ ASOP is a specification. The most useful contributions are usually not prose.
 
 ## What helps most
 
-**Conformance vectors.** The spec carries 109 normative assertions and ten are
-covered by a vector — the README says so, and the suite admits a
-pattern-matcher could still pass. A vector for an uncovered rule is worth more
+**Conformance vectors.** The spec carries 159 normative assertions and 56 are
+cited by a vector (recount with the commands in `conformance/README.md`), and the
+suite admits a pattern-matcher could still pass. A vector for an uncovered rule is worth more
 than a paragraph explaining the rule better. `conformance/README.md` has the
 format.
 

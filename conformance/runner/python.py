@@ -21,23 +21,41 @@ import yaml
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from asop.errors import Refusal
-from asop.gates import gate_satisfied, validate_attestation, validate_gate
+from asop.gates import gate_outcome, gate_satisfied, validate_attestation, validate_gate
 from asop.refusals import CODES as REFUSAL_CODES
 from asop.revision import may_flip
-from asop.chain import join_state, plan_handoffs, plan_join, requires_satisfied, version_in
+from asop.chain import (ChainContractError, fanout_startable, join_state, plan_entry, plan_handoffs,
+                        plan_join, plan_rework, requires_satisfied, version_in)
+from asop.journal import chain_outcome, charged_failures, resume_point, stale_runs
+from asop.manifest import adoption_impact, manifest_resolver, pin_manifest
 from asop.sop import SopContractError, validate_asop
 
 VECTORS = pathlib.Path(__file__).resolve().parents[1] / "vectors"
 SUBMITTER = "conformance-runner"
 
 
-def _handoff_decisions(vector: dict, library: dict) -> list[str]:
-    """Render each filing decision the way handoff.yaml spells it."""
+def _resolver(library: dict):
+    """The library lists each procedure's ACTIVE version: asop_id -> {version: body}."""
     def resolve(to):
         for version, body in (library.get(to["asop_id"]) or {}).items():
             if version_in(to, int(version)):
                 return int(version), validate_asop(body, asop_id=to["asop_id"])
         return None
+    return resolve
+
+
+def _handoff_decisions(vector: dict, library: dict) -> list[str]:
+    """Render each filing decision the way handoff.yaml spells it."""
+    resolve = _resolver(library)
+    if "pinned" in vector:
+        # v3.6: the chain resolves from its manifest, not from what is active now
+        pins = {"schema": "asop.chain-manifest/1", "chain": vector.get("chain", "R1"),
+                "start": {"asop_id": vector["filer"], "version": next(iter(library[vector["filer"]]))},
+                "members": [{"asop_id": a, "version": ver, "digest": "sha256:" + "0" * 64}
+                            for a, ver in vector["pinned"].items()]}
+        bodies = vector.get("store") or {}
+        resolve = manifest_resolver(pins, lambda a, ver: (validate_asop(bodies[a][ver], asop_id=a)
+                                                          if ver in (bodies.get(a) or {}) else None))
 
     filer = vector["filer"]
     (_, body), = library[filer].items()
@@ -49,13 +67,17 @@ def _handoff_decisions(vector: dict, library: dict) -> list[str]:
         # the join's filing, once join.yaml's question says it is ready
         decisions = plan_join(body, vector["join"], **common)
     else:
-        decisions = plan_handoffs(body, requests=vector.get("requests") or [], **common)
+        decisions = plan_handoffs(body, requests=vector.get("requests") or [], approvals=vector.get("approvals"),
+                                  output_digests=vector.get("output_digests"), **common)
     out = []
     for d in decisions:
         if d["action"] == "wait":
             out.append(f"wait {d['handoff']}")
         elif d["action"] == "file":
-            out.append(f"file {d['to']['asop_id']}@{d['to']['version']} {d['subject']}")
+            line = f"file {d['to']['asop_id']}@{d['to']['version']} {d['subject']}"
+            if d.get("depends_on"):
+                line += " after " + ",".join(d["depends_on"])
+            out.append(line)
         elif d["action"] == "duplicate":
             out.append(f"duplicate {d['natural_key']}")
         else:
@@ -65,6 +87,97 @@ def _handoff_decisions(vector: dict, library: dict) -> list[str]:
             else:
                 out.append(f"refuse {d['code']}" + (f" -> {','.join(d['toward'])}" if d.get("toward") else ""))
     return out
+
+
+# --- v3.6 questions -----------------------------------------------------------
+# Each takes (vector, suite) and returns (matched, what happened). Every input is
+# in the vector or the suite's shared `library`, as for hand-offs.
+
+def _compare(got, want, what: str) -> tuple[bool, str]:
+    return (True, f"{what}={got}") if got == want else (False, f"expected {what}={want}, got {got}")
+
+
+def _entry(vector: dict, suite: dict) -> tuple[bool, str]:
+    gates = validate_asop(suite["library"][vector["consumer"]], asop_id=vector["consumer"])["entry_gates"]
+    got = plan_entry(gates, outcomes=vector.get("outcomes") or {}, producers=vector.get("producers") or {})
+    rendered = [got["action"]] + [f"refile {r['natural_key']}" + (" charged" if r["charged"] else "")
+                                  for r in got.get("refile", [])] \
+        + [f"hold {h['gate']} {h['reason']}" for h in got.get("hold", [])]
+    return _compare(rendered, vector["expect"], "decision")
+
+
+def _rework(vector: dict, suite: dict) -> tuple[bool, str]:
+    library = suite["library"]
+    (_, body), = library[vector["filer"]].items()
+    got = plan_rework(validate_asop(body, asop_id=vector["filer"]), outcome=vector.get("outcome"),
+                      failed_step=vector.get("failed_step"), rounds_used=vector.get("rounds_used"),
+                      outputs=vector.get("outputs"), owner=vector.get("owner"), resolve=_resolver(library),
+                      chain=vector.get("chain", "R1"))
+    if got is None:
+        rendered = "none"
+    elif got["action"] == "refuse":
+        rendered = f"refuse {got['code']}"
+    elif got["action"] == "escalate":
+        rendered = "escalate rounds_exhausted"
+    elif "from_step" in got:
+        rendered = f"rework steps {got['from_step']}..{got['through_step']} round {got['round']}"
+    else:
+        rendered = (f"rework {got['natural_key']} round {got['round']}"
+                    + (f" findings {got['prior_findings']}" if "prior_findings" in got else ""))
+    return _compare(rendered, vector["expect"], "decision")
+
+
+def _fanout(vector: dict, suite: dict) -> tuple[bool, str]:
+    handoff = {"id": "each", "subject_from": {"concurrency": vector["concurrency"]} if "concurrency" in vector else {}}
+    decisions = [{"action": "file", "handoff": "each", "natural_key": k, "depends_on": deps}
+                 for k, deps in vector["filed"]]
+    got = fanout_startable(handoff, decisions, done=vector.get("done") or [], started=vector.get("started") or [])
+    return _compare(got, vector["startable"], "startable")
+
+
+def _manifest(vector: dict, suite: dict) -> tuple[bool, str]:
+    if "old" in vector:
+        got = [f"{r['kind']} {r['name']} {r['effect']}" for r in adoption_impact(vector["old"], vector["new"])]
+        return _compare(got, vector["impact"], "impact")
+    library = vector.get("library") or suite.get("library") or {}
+    resolve = _resolver(library)
+    start = vector["start"]
+    (_, body), = library[start].items()
+    try:
+        m = pin_manifest(start, int(next(iter(library[start]))), validate_asop(body, asop_id=start), resolve,
+                         chain=vector.get("chain", "R1"))
+    except ChainContractError as e:
+        return _compare("refuse", vector["expect"], "pin") if vector["expect"] == "refuse" else \
+            (False, f"refused: {e}")
+    got = [f"{x['asop_id']}@{x['version']}" for x in m["members"]]
+    return _compare(got, vector["expect"], "members")
+
+
+def _journal(vector: dict, suite: dict) -> tuple[bool, str]:
+    body = validate_asop(suite["procedure"])
+    entries = [{"step": s, "event": ev, **({"fault_class": fc} if fc else {})}
+               for s, ev, *rest in vector["entries"] for fc in [rest[0] if rest else None]]
+    if "charged" in vector:
+        return _compare(charged_failures(entries, step=vector["step"]), vector["charged"], "charged")
+    r = resume_point(body, entries)
+    got = {k: r[k] for k in vector["expect"]}
+    return _compare(got, vector["expect"], "resume")
+
+
+def _staleness(vector: dict, suite: dict) -> tuple[bool, str]:
+    return _compare(stale_runs(vector["lineage"], vector.get("changed") or {}), vector["stale"], "stale")
+
+
+def _chain_outcome(vector: dict, suite: dict) -> tuple[bool, str]:
+    runs = [{"asop_id": r[0], "version": r[1], "subject": r[2], "attempt": r[3], "status": r[4]}
+            for r in vector["runs"]]
+    r = chain_outcome(runs, chain=vector.get("chain", "R1"), chain_gate=vector.get("chain_gate"))
+    return _compare([r["verdict"], r["mixed_versions"]], [vector["verdict"], vector.get("mixed_versions", [])],
+                    "verdict")
+
+
+V36_QUESTIONS = {"entry": _entry, "rework": _rework, "fanout": _fanout, "manifest": _manifest,
+                 "journal": _journal, "staleness": _staleness, "chain-outcome": _chain_outcome}
 
 
 def run_one(artifact: str, vector: dict, suite: dict | None = None) -> tuple[bool, str]:
@@ -91,8 +204,13 @@ def run_one(artifact: str, vector: dict, suite: dict | None = None) -> tuple[boo
             # each run: [asop_id, subject, attempt, done]
             runs = [{"asop_id": r[0], "subject": r[1], "attempt": r[2], "done": r[3]}
                     for r in vector.get("runs") or []]
-            got = requires_satisfied(vector["requires"], chain=vector.get("chain", "R1"), runs=runs,
-                                     approved=vector.get("approved") or [])
+            reqs = validate_asop({"title": "t", "roles": {"w": {"kind": "agent"}},
+                                  "steps": [{"name": "s", "role": "w", "purpose": "p",
+                                             "gate": {"kind": "deterministic", "check": "c"}}],
+                                  "requires": vector["requires"]})["requires"]
+            got = requires_satisfied(reqs, chain=vector.get("chain", "R1"), runs=runs,
+                                     approved=vector.get("approved") or [], approvals=vector.get("approvals"),
+                                     digests=vector.get("digests"), chain_gates=vector.get("chain_gates"))
             if got != vector["satisfied"]:
                 return False, f"expected satisfied={vector['satisfied']}, got {got}"
             return True, f"satisfied={got}"
@@ -122,6 +240,11 @@ def run_one(artifact: str, vector: dict, suite: dict | None = None) -> tuple[boo
             want = vector["satisfied"]
             if got != want:
                 return False, f"expected satisfied={want}, got {got}"
+            if "outcome" in vector:   # v3.6: which of the outcomes, not only whether it passed
+                outcome = gate_outcome(gate, attested)
+                if outcome != vector["outcome"]:
+                    return False, f"expected outcome={vector['outcome']}, got {outcome}"
+                return True, f"satisfied={got} outcome={outcome}"
             return True, f"satisfied={got}"
         elif artifact == "ownership":
             # Not a document question either: given a run's owner and a store
@@ -136,6 +259,8 @@ def run_one(artifact: str, vector: dict, suite: dict | None = None) -> tuple[boo
                 # implementation would ship `not_owner` and pass anyway.
                 return False, f"{expected_code!r} is not in asop.refusals"
             return True, f"may_flip={got}" + (f" ({expected_code})" if expected_code else "")
+        elif artifact in V36_QUESTIONS:
+            return V36_QUESTIONS[artifact](vector, suite or {})
         else:
             return False, f"runner does not know artifact {artifact!r}"
         got, code = "accept", None
