@@ -70,6 +70,26 @@ library:
       roles: {worker: {kind: agent}}
       steps: [{name: merge, role: worker, purpose: merge them, gate: {kind: deterministic, check: make merge}}]
 
+  planner:
+    1:
+      title: Plan the work
+      inputs: [{name: root}]
+      roles: {worker: {kind: agent}}
+      steps: [{name: plan, role: worker, purpose: cut the tasks, gate: {kind: deterministic, check: make plan}}]
+      outputs: [{name: tasks}]
+      handoffs:
+        - id: build-each
+          to: {asop_id: build, version: 1}
+          cardinality: many
+          subject_from: {output: tasks, array: tasks, id_field: id, order_by: depends_on, concurrency: 2, approved_subset: true}
+          inputs: {task: $subject, root: $run.inputs.root}
+  build:
+    1:
+      title: Build one task
+      inputs: [{name: task}, {name: root}]
+      roles: {worker: {kind: agent}}
+      steps: [{name: build, role: worker, purpose: build it, gate: {kind: deterministic, check: make build}}]
+
 x-sources: &sources
   sources:
     sources:
@@ -79,6 +99,20 @@ x-sources: &sources
       - {id: s4, kind: spec, removed: true}
 
 x-both: &both ["file extract@2 s1", "file extract@2 s2", "wait consolidate"]
+
+x-tasks: &tasks
+  tasks:
+    tasks:
+      - {id: T1, depends_on: []}
+      - {id: T2, depends_on: [T1]}
+      - {id: T3, depends_on: [T1, T2]}
+x-approved: &approved {tasks: {digest: "sha256:aa"}}
+x-digests: &digests {tasks: "sha256:aa"}
+x-extract3: &extract3
+  title: Extract one source, third version
+  inputs: [{name: source_id}, {name: root}]
+  roles: {worker: {kind: agent}}
+  steps: [{name: extract, role: worker, purpose: extract it, gate: {kind: deterministic, check: make extract}}]
 
 vectors:
   - id: ho-fan-out-expands-with-filters
@@ -332,3 +366,106 @@ vectors:
     join: report
     expect: ["refuse handoff_refused:version -> gone"]
     because: "a join's target resolves when the join fires, not when the parent finished; no active version in range then is refused, and blocks whatever waits on it"
+
+  # ---- v3.6 (§3.7): ordered and approved fan-outs ---------------------------
+  - id: ho-ordered-fan-out-carries-dependencies
+    asserts: [A141, A143]
+    filer: planner
+    outputs: *tasks
+    run_inputs: {root: R1}
+    approvals: *approved
+    output_digests: *digests
+    expect: ["file build@1 T1", "file build@1 T2 after R1|build|T1|a1", "file build@1 T3 after R1|build|T1|a1,R1|build|T2|a1"]
+    because: "each filed run names the runs it must wait for, as natural keys"
+
+  - id: ho-refuse-dependency-not-filed
+    asserts: [A141]
+    filer: planner
+    outputs: {tasks: {tasks: [{id: T1, depends_on: [T0]}]}}
+    run_inputs: {root: R1}
+    approvals: *approved
+    output_digests: *digests
+    expect: ["refuse handoff_refused:order -> build"]
+    because: "a run waiting on a run nobody files never starts; refused whole, and the join over it is blocked"
+
+  - id: ho-refuse-dependency-cycle
+    asserts: [A141]
+    filer: planner
+    outputs: {tasks: {tasks: [{id: A, depends_on: [B]}, {id: B, depends_on: [A]}]}}
+    run_inputs: {root: R1}
+    approvals: *approved
+    output_digests: *digests
+    expect: ["refuse handoff_refused:order -> build"]
+
+  - id: ho-order-breaking-request-is-disregarded
+    asserts: [A141]
+    filer: planner
+    outputs: *tasks
+    run_inputs: {root: R1}
+    approvals: *approved
+    output_digests: *digests
+    requests: [{schema: asop.filing-request/1, handoff: build-each, to: build, subject: T3}]
+    expect: ["refuse handoff_refused:order", "file build@1 T1", "file build@1 T2 after R1|build|T1|a1", "file build@1 T3 after R1|build|T1|a1,R1|build|T2|a1"]
+    because: "a refused request is as if it had not been written: narrowing to T3 alone cannot make the declared fan-out unfileable"
+
+  - id: ho-approved-subset-only
+    asserts: [A143]
+    filer: planner
+    outputs: *tasks
+    run_inputs: {root: R1}
+    approvals: {tasks: {digest: "sha256:aa", subset: [T1, T2]}}
+    output_digests: *digests
+    expect: ["file build@1 T1", "file build@1 T2 after R1|build|T1|a1"]
+    because: "a person approved two of the three tasks; the third is not filed"
+
+  - id: ho-refuse-subset-missing-prerequisite
+    asserts: [A141, A143]
+    filer: planner
+    outputs: *tasks
+    run_inputs: {root: R1}
+    approvals: {tasks: {digest: "sha256:aa", subset: [T2]}}
+    output_digests: *digests
+    expect: ["refuse handoff_refused:order -> build"]
+    because: "approving a task without its prerequisite approves a run that can never start"
+
+  - id: ho-refuse-stale-approval
+    asserts: [A143]
+    filer: planner
+    outputs: *tasks
+    run_inputs: {root: R1}
+    approvals: *approved
+    output_digests: {tasks: "sha256:bb"}
+    expect: ["refuse handoff_refused:approval -> build"]
+    because: "the plan changed after it was approved; the approval approved something else"
+
+  - id: ho-refuse-no-approval
+    asserts: [A143]
+    filer: planner
+    outputs: *tasks
+    run_inputs: {root: R1}
+    output_digests: *digests
+    expect: ["refuse handoff_refused:approval -> build"]
+
+  # ---- v3.6 (§3.10): a pinned chain resolves from its manifest -------------
+  - id: ho-pinned-chain-files-the-pinned-version
+    asserts: [A154]
+    filer: intake
+    outcome: FETCHED
+    outputs: *sources
+    run_inputs: {root: R1}
+    pinned: {intake: 1, extract: 3}
+    store: {extract: {3: *extract3}}
+    expect: ["file extract@3 s1", "file extract@3 s2", "wait consolidate"]
+    because: "the active version is 2, the chain pinned 3 at its start; a pinned chain never reaches for what is active now"
+
+  - id: ho-pinned-outside-range-is-refused
+    asserts: [A154]
+    filer: intake
+    outcome: FETCHED
+    outputs: *sources
+    run_inputs: {root: R1}
+    pinned: {intake: 1, extract: 1}
+    store: {extract: {1: *extract3}}
+    expect: ["refuse handoff_refused:version -> extract", "wait consolidate"]
+    because: "the pinned version does not satisfy the reference's range; there is no fallback to the active one"
+

@@ -1,0 +1,43 @@
+# Conformance vectors — which runs are STALE? (§5.7, v3.6)
+#
+# `lineage` maps a natural key to the artefacts the run read, with the digest it
+# read (null: a question that was still open). `changed` maps an artefact to its
+# new digest. `stale` is the sorted answer. One rule covers outputs, sources
+# (readiness), approvals and a person's answers: an answer is an input.
+
+artifact: staleness
+x-lineage: &lineage
+  "C1|plan|C1|a1": {read: {source: "sha256:s1", "question:Q1": null}}
+  "C1|build|T1|a1": {read: {tasks: "sha256:t1"}}
+  "C1|build|T2|a1": {read: {tasks: "sha256:t1", "question:Q2": "sha256:yes"}}
+vectors:
+  - id: st-answer-to-open-question-is-an-input
+    asserts: [A158]
+    lineage: *lineage
+    changed: {"question:Q1": "sha256:yes"}
+    stale: ["C1|plan|C1|a1"]
+    because: "the plan was built while Q1 was open; writing the answer makes it stale, and it is re-filed"
+
+  - id: st-same-answer-changes-nothing
+    asserts: [A158]
+    lineage: *lineage
+    changed: {"question:Q2": "sha256:yes"}
+    stale: []
+
+  - id: st-changed-source-invalidates-readiness
+    asserts: [A158]
+    lineage: *lineage
+    changed: {source: "sha256:s2"}
+    stale: ["C1|plan|C1|a1"]
+
+  - id: st-changed-output-reaches-every-reader
+    asserts: [A158]
+    lineage: *lineage
+    changed: {tasks: "sha256:t2"}
+    stale: ["C1|build|T1|a1", "C1|build|T2|a1"]
+
+  - id: st-nothing-changed
+    asserts: [A158]
+    lineage: *lineage
+    changed: {}
+    stale: []

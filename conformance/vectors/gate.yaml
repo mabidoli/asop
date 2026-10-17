@@ -168,3 +168,95 @@ vectors:
     expect: refuse
     refusal: gate_invalid
     because: "an unknown field is a caller believing something the gate will not do"
+
+  # ---- v3.6 (§3.3): the third outcome, the case floor, the default ---------
+  - id: gate-accept-cannot-evaluate-exit
+    asserts: [A135, A138]
+    document: {kind: deterministic, check: "make test", cannot_evaluate_exit: 3, min_cases: 1}
+    expect: accept
+    because: "a deterministic gate may declare the exit status that means 'could not evaluate', and the fewest cases a pass must run"
+
+  - id: gate-refuse-cannot-evaluate-exit-zero
+    asserts: [A138]
+    document: {kind: deterministic, check: "make test", cannot_evaluate_exit: 0}
+    expect: refuse
+    refusal: gate_invalid
+    reaches: "1..255"
+    because: "0 is a pass; it cannot also mean 'could not tell'"
+
+  - id: gate-refuse-cannot-evaluate-on-judged
+    asserts: [A138]
+    document: {kind: judged, check: "is the plan coherent", cannot_evaluate_exit: 3}
+    expect: refuse
+    refusal: gate_invalid
+    reaches: "cannot_evaluate_exit is set on a 'judged'"
+    because: "only a deterministic gate is judged by its exit status"
+
+  - id: gate-refuse-min-cases-zero
+    asserts: [A138]
+    document: {kind: deterministic, check: "make test", min_cases: 0}
+    expect: refuse
+    refusal: gate_invalid
+    reaches: "min_cases must be a positive integer"
+    because: "a floor of zero cases is the empty suite this field exists to refuse"
+
+  - id: gate-accept-proceed-on-default
+    asserts: [A139]
+    document:
+      kind: human
+      check: "which retention period applies?"
+      verifier: dana
+      max_park_seconds: 3600
+      on_timeout: proceed_on_default
+      default: {option: "keep the current period", consequence: "the purge job is built for it", audience: "product owner"}
+    expect: accept
+    because: "a non-blocking question: after an hour the run builds on the declared default, and says so to the named audience"
+
+  - id: gate-refuse-proceed-without-default
+    asserts: [A139]
+    document: {kind: human, check: "which period?", verifier: dana, max_park_seconds: 3600, on_timeout: proceed_on_default}
+    expect: refuse
+    refusal: gate_invalid
+    reaches: "needs default"
+    because: "proceeding on a default nobody declared is the invisible decision"
+
+  - id: gate-refuse-default-without-audience
+    asserts: [A139]
+    document:
+      kind: human
+      check: "which period?"
+      verifier: dana
+      max_park_seconds: 3600
+      on_timeout: proceed_on_default
+      default: {option: "keep it", consequence: "built for it"}
+    expect: refuse
+    refusal: gate_invalid
+    reaches: "needs default"
+    because: "a default nobody is told about is not visible, so it is not owned"
+
+  - id: gate-refuse-proceed-on-deterministic
+    asserts: [A139]
+    document:
+      kind: deterministic
+      check: "make test"
+      max_park_seconds: 3600
+      on_timeout: proceed_on_default
+      default: {option: a, consequence: b, audience: c}
+    expect: refuse
+    refusal: gate_invalid
+    reaches: "on a 'deterministic' gate"
+    because: "a check that did not run did not pass; only a person's question has a default answer"
+
+  - id: gate-refuse-default-under-fail
+    asserts: [A139]
+    document:
+      kind: human
+      check: "which period?"
+      verifier: dana
+      max_park_seconds: 3600
+      on_timeout: fail
+      default: {option: a, consequence: b, audience: c}
+    expect: refuse
+    refusal: gate_invalid
+    reaches: "default is set but on_timeout is 'fail'"
+    because: "a default nothing would ever read"

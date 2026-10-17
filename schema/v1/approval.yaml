@@ -1,0 +1,47 @@
+# =============================================================================
+# Approval — a person's approval of an artefact, bound to its digest and,
+# optionally, to a subset of the subjects it lists (ASOP.md §3.7, v3.6).
+#
+# JSON Schema draft 2020-12, authored in YAML. Read by `requires:
+# human_approved` with `binds_digest`, and by a fan-out with
+# `subject_from.approved_subset`. An approval whose digest is not the
+# artefact's current one approved something else: it is stale, and nothing is
+# built on it (§5.7). `approved_by` must be a declared human (§9) — a
+# cross-record rule, enforced where the approval is recorded.
+# =============================================================================
+
+$id: https://raw.githubusercontent.com/mabidoli/asop/main/schema/v1/approval.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Approval
+type: object
+additionalProperties: false
+required: [schema, artefact, digest, approved_by, approved_at]
+properties:
+  schema:
+    const: asop.approval/1
+  artefact:
+    type: string
+    pattern: '^\S([\s\S]*\S)?$'
+    description: What was approved, by the name a `requires` or a fan-out's `output` uses.
+  digest:
+    type: string
+    minLength: 1
+    pattern: '\S'
+    description: The digest of exactly what the person looked at.
+  subset:
+    type: array
+    uniqueItems: true
+    items:
+      oneOf:
+        - type: string
+          pattern: '^\S([\s\S]*\S)?$'
+        - type: integer
+    description: >-
+      The subjects approved. Absent approves every subject. A subject the
+      artefact does not contain refuses the fan-out (`handoff_refused:approval`).
+  approved_by:
+    type: string
+    pattern: '^\S([\s\S]*\S)?$'
+  approved_at:
+    type: string
+    format: date-time

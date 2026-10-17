@@ -16,12 +16,12 @@ A document and the outcome a conforming implementation must reach. Nothing else.
   because: "a human gate nobody is named on is a gate nobody answers"
 ```
 
-`asserts` cites [`assertions.yaml`](assertions.yaml) — the 134 normative rules
+`asserts` cites [`assertions.yaml`](assertions.yaml) — the 159 normative rules
 extracted from the specification — so a rule with no vector is visibly untested
 rather than quietly untested.
 
 > **These counts are facts about the files, and they went stale once.** They read
-> 107/8/39 while the files said 109/10/61 (now 134/33/140, v3.5), which is worse than having no numbers:
+> 107/8/39 while the files said 109/10/61 (134/33/140 at v3.5; now 159/56/229, v3.6), which is worse than having no numbers:
 > a reader cross-checking a coverage claim against this README would have found a
 > mismatch and concluded the claim was wrong. Recount before trusting:
 >
@@ -52,6 +52,13 @@ Exit 0 when every vector matches, 1 otherwise, so CI can gate on it.
 | `vectors/chain-record.yaml` *(v3.5)* | is this record's chaining well formed? |
 | `vectors/handoff.yaml` *(v3.5)* | given a finished run, **what is filed next, and what is refused?** |
 | `vectors/requires.yaml` *(v3.5)* | **may a filed run start?** |
+| `vectors/entry.yaml` *(v3.6)* | given its entry gates' outcomes, **start, wait, or re-file / hold?** |
+| `vectors/fanout.yaml` *(v3.6)* | which runs of an ordered fan-out **may start now?** |
+| `vectors/rework.yaml` *(v3.6)* | what does a declared **rework** edge do? |
+| `vectors/manifest.yaml` *(v3.6)* | what does a chain **pin**, and what does an adoption change? |
+| `vectors/journal.yaml` *(v3.6)* | where does a run stand after a restart, and **what is charged?** |
+| `vectors/staleness.yaml` *(v3.6)* | which runs are **stale**? |
+| `vectors/chain-outcome.yaml` *(v3.6)* | is the **chain** done? |
 
 The third exists because the first two cannot answer it. A failing attestation is
 a *valid document* — refusing it would leave failure unrecordable — so an
@@ -73,16 +80,17 @@ Stated here because a suite that hides its own coverage is worse than a small on
   convention rather than contract, and pinning it would make the suite a stricter
   opinion than the standard. The cost is that two conforming implementations may
   return different shapes for the same input.
-- **A pattern-matcher could still pass.** With 140 vectors, an implementation that
+- **A pattern-matcher could still pass.** With 229 vectors, an implementation that
   recognises these specific documents rather than implementing the rules would
   score full marks. Commands are varied across vectors to make that less
   comfortable, but the real answer is more vectors, and the honest statement is
   that passing proves the rules exercised here and nothing beyond them.
 - **Only refusal codes are compared, not messages.** Two implementations may
   refuse the same document for different stated reasons.
-- **33 of the 134 assertions are cited by a vector** (10 before v3.5; 23 of the 25
-  hand-off assertions, A110–A134, are cited, and A130 and A132 need a resolver). The
-  other 101 are all `testable: true`. 88 of them need artifact types the runner does not have yet —
+- **56 of the 159 assertions are cited by a vector** (10 before v3.5, 33 at v3.5; 23 of
+  the 25 hand-off assertions, A110–A134, and 23 of the 25 v3.6 assertions, A135–A159,
+  are cited; A130, A132, A148 and A152 need a resolver). The other 103 are all
+  `testable: true`. 88 of them need artifact types the runner does not have yet —
   an `asop` record, a `step`, a `revision` changeset — so the honest number for
   what is coverable today is smaller than the gap looks.
 - **21 refusal sites in the reference implementation are unreachable by any
@@ -209,3 +217,38 @@ Not yet covered:
   `schema_version`, which the stored `step.yaml`/`gate.yaml` schema refuses. Found while
   cross-checking these vectors against the schema; it predates v3.5 and is listed here
   so nobody re-discovers it.
+
+## v3.6 — chains (§3.3, §3.7–§3.10, §5.2–§5.8)
+
+Additions to six files and seven new ones. Every v3.5 vector is unchanged and still
+passes: that is the compatibility claim, made checkable.
+
+- `gate.yaml`, `attestation.yaml`, `satisfaction.yaml` — the third outcome
+  (`cannot_evaluate_exit`, `min_cases`, `cases_run`) and `proceed_on_default`. A
+  satisfaction vector may now also say which **outcome** (`passed`, `failed`,
+  `cannot_evaluate`, `incomplete`) the evidence reaches. `sat-zero-cases-exit-zero-is-refused`
+  is the empty suite: exit 0, zero cases, not a pass. Two `sat-v35-*` vectors pin that a
+  gate declaring neither field keeps its v3.5 outcomes.
+- `chain-record.yaml` — entry gates, rework edges, the new `subject_from` fields and
+  `requires` kinds.
+- `handoff.yaml` — ordered and approved fan-outs, and `pinned:` vectors that resolve from
+  a chain manifest instead of the active version (`store` supplies the pinned bodies).
+- `requires.yaml` — `binds_digest` and `chain_gate`.
+- `entry.yaml`, `fanout.yaml`, `rework.yaml`, `manifest.yaml`, `journal.yaml`,
+  `staleness.yaml`, `chain-outcome.yaml` — one question each, the format described in
+  each file's header.
+
+The new rules were checked with 16 deliberate mutants of the reference implementation;
+the vectors caught every one.
+
+Not yet covered by a vector:
+
+- **cross-record checks at activation for v3.6** — a preflight against a target with no
+  entry gates (A148), a rework edge that does not go upstream (A152): Python tests only,
+  for the same reason as A130/A132 (no resolver in the format).
+- **adoption validation** (`validate_adoption`): the impact computation has vectors; the
+  record's digest and impact cross-checks are Python tests only.
+- **digests across languages**: `manifest.yaml` lists pins, not digests. Canonical JSON
+  is specified (§3.10) but no vector yet pins a digest string a second implementation
+  must reproduce.
+

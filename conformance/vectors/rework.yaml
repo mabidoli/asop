@@ -1,0 +1,104 @@
+# Conformance vectors — what does a declared REWORK edge do? (§3.9, v3.6)
+#
+# A rework edge is a declared, bounded loop with no person in it: back to an
+# earlier step of this procedure when a later step's gate fails, or back to the
+# upstream procedure that owns a finding when this run finishes with a
+# rework outcome. `library` lists each procedure's ACTIVE version, as in
+# handoff.yaml. `expect` is one line: `none` (no edge for this trigger — the
+# v3.5 path), `rework steps <n>..<k> round <r>`, `rework <natural key> round <r>
+# [findings <ref>]`, `escalate rounds_exhausted`, or `refuse <code>`.
+
+artifact: rework
+library:
+  build:
+    1:
+      title: Build one task
+      inputs: [{name: task}]
+      roles: {worker: {kind: agent}}
+      steps:
+        - {name: write-tests, role: worker, purpose: write them, gate: {kind: deterministic, check: make t}}
+        - {name: implement, role: worker, purpose: implement, gate: {kind: deterministic, check: make i}}
+        - {name: prove, role: worker, purpose: prove the tests bite, gate: {kind: deterministic, check: make p}}
+      outcomes: [BUILT]
+      handoffs: [{id: review, to: {asop_id: review, version: 1}, on_outcomes: [BUILT]}]
+      rework: [{id: rewrite-tests, to: {step: 1}, on_step_failure: 3, max_rounds: 2, consumes_attempt: false}]
+  review:
+    1:
+      title: Review
+      roles: {worker: {kind: agent}}
+      steps: [{name: review, role: worker, purpose: review, gate: {kind: deterministic, check: make r}}]
+      outcomes: [ACCEPTED, PLAN_FINDINGS]
+      outputs: [{name: findings}]
+      rework: [{id: replan, to: {asop_id: plan, versions: ">=1"}, on_outcomes: [PLAN_FINDINGS], findings: findings, max_rounds: 2, consumes_attempt: false, tier_bump: true}]
+  plan:
+    3:
+      title: Plan
+      inputs: [{name: source}]
+      roles: {worker: {kind: agent}}
+      steps: [{name: plan, role: worker, purpose: plan, gate: {kind: deterministic, check: make plan}}]
+      handoffs: [{id: build, to: {asop_id: build, version: 1}, inputs: {task: $run.inputs.source}}]
+x-owner: &owner {asop_id: plan, subject: C1, attempt: 1, inputs: {source: doc.md}}
+vectors:
+  - id: rw-step-failure-reruns-earlier-step
+    asserts: [A149]
+    filer: build
+    failed_step: 3
+    expect: "rework steps 1..3 round 1"
+    because: "tests that do not bite are rewritten, not merely re-proved"
+
+  - id: rw-step-rounds-exhausted-escalate
+    asserts: [A150]
+    filer: build
+    failed_step: 3
+    rounds_used: {rewrite-tests: 2}
+    expect: "escalate rounds_exhausted"
+    because: "the bound is the point: after max_rounds a person looks, §5.4"
+
+  - id: rw-no-edge-is-the-v35-path
+    asserts: [A149]
+    filer: build
+    failed_step: 2
+    expect: "none"
+    because: "no edge for step 2: an ordinary repair, exactly as in v3.5"
+
+  - id: rw-owner-refiled-with-findings
+    asserts: [A151]
+    filer: review
+    chain: C1
+    outcome: PLAN_FINDINGS
+    outputs: {findings: review/findings.json}
+    owner: *owner
+    expect: "rework C1|plan|C1|a2 round 1 findings review/findings.json"
+    because: "the owner of the finding is re-filed as its next attempt, carrying the findings, with no person in between"
+
+  - id: rw-owner-rounds-exhausted
+    asserts: [A150]
+    filer: review
+    outcome: PLAN_FINDINGS
+    outputs: {findings: f}
+    owner: *owner
+    rounds_used: {replan: 2}
+    expect: "escalate rounds_exhausted"
+
+  - id: rw-refuse-no-owner
+    asserts: [A151]
+    filer: review
+    outcome: PLAN_FINDINGS
+    outputs: {findings: f}
+    expect: "refuse rework_refused:owner"
+    because: "the engine resolves the upstream run by lineage; with none, there is nothing to re-file"
+
+  - id: rw-refuse-structured-findings
+    asserts: [A151]
+    filer: review
+    outcome: PLAN_FINDINGS
+    outputs: {findings: {count: 4}}
+    owner: *owner
+    expect: "refuse rework_refused:findings"
+    because: "values handed on are scalars (§3.7): hand a path to the findings, not the findings"
+
+  - id: rw-accepted-is-not-rework
+    asserts: [A149]
+    filer: review
+    outcome: ACCEPTED
+    expect: "none"

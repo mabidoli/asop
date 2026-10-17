@@ -79,16 +79,32 @@ VERIFY_CAPABILITY = "verify"
 # What happens to a gated item still unverified when its park clock expires.
 # `escalate` is the only value that needs a destination, because it is the
 # only one that hands the decision to somebody.
-ON_TIMEOUT = ("pass", "fail", "escalate")
+ON_TIMEOUT = ("pass", "fail", "escalate", "proceed_on_default")
+
+# `proceed_on_default` (v3.6) is the one value that needs a declared `default`,
+# because it is the only one that builds on an answer nobody gave. The default
+# names the option taken, what follows from it, and who must hear about it; the
+# engine records it, and a late answer that differs reopens what was built on it
+# (ASOP.md §5.7). Offered on `human` gates only: a judge that cannot be reached
+# is not a question with a default, it is a gate that did not run.
+DEFAULT_FIELDS = ("option", "consequence", "audience")
 
 CORE_FIELDS = ("kind", "class", "check", "checks")
-CLOCK_FIELDS = ("max_park_seconds", "on_timeout", "escalate_to", "verifier")
+CLOCK_FIELDS = ("max_park_seconds", "on_timeout", "escalate_to", "verifier", "default")
 # The two clock fields whose presence, together, decides whether the group is
 # "declared" at all. `escalate_to`/`verifier` are conditional WITHIN the
 # group (by `on_timeout` and by `kind`), not part of deciding whether the
 # group exists.
 CLOCK_CORE_FIELDS = ("max_park_seconds", "on_timeout")
-EXECUTION_FIELDS = ("cwd", "timeout_s", "rubric", "judge_route")
+EXECUTION_FIELDS = ("cwd", "timeout_s", "rubric", "judge_route", "cannot_evaluate_exit", "min_cases")
+
+# The three outcomes a gate can reach (ASOP.md §5.2, v3.6). `cannot_evaluate`
+# is the third: the check could not judge the work — a suite that collected
+# nothing, an input that was not there. It never releases dependents and it is
+# never charged to the executor. Opt-in per gate, by declaring
+# `cannot_evaluate_exit` or `min_cases`; a gate declaring neither has the two
+# outcomes it always had, so no v3.5 gate changes meaning.
+GATE_OUTCOMES = ("passed", "failed", "cannot_evaluate", "incomplete")
 GATE_FIELDS = CORE_FIELDS + CLOCK_FIELDS + EXECUTION_FIELDS
 
 ATTESTATION_FIELDS = (
@@ -99,6 +115,7 @@ ATTESTATION_FIELDS = (
     "at",
     "submitted_by",
     "verdict",
+    "cases_run",
 )
 
 SCHEMA_VERSION = 1
@@ -319,7 +336,8 @@ def _validate_clock(payload: dict, *, kind: str, required: bool, ceiling: Option
                 f"check, and the plane is not entitled to answer any of "
                 f"them on your behalf.",
             )
-        return {"max_park_seconds": None, "on_timeout": None, "escalate_to": None, "verifier": None}
+        return {"max_park_seconds": None, "on_timeout": None, "escalate_to": None, "verifier": None,
+                "default": None}
 
     if len(core_present) != len(CLOCK_CORE_FIELDS):
         missing = [f for f in CLOCK_CORE_FIELDS if f not in core_present]
@@ -357,8 +375,9 @@ def _validate_clock(payload: dict, *, kind: str, required: bool, ceiling: Option
             GATE_INVALID,
             f"on_timeout must be one of {list(ON_TIMEOUT)}, got {on_timeout!r}",
             "Decide what happens to this unit of work if nobody verifies "
-            "it in time: 'pass', 'fail', or 'escalate' to a named "
-            "destination. There is deliberately no default — a "
+            "it in time: 'pass', 'fail', 'escalate' to a named "
+            "destination, or 'proceed_on_default' with a declared default. "
+            "There is deliberately no library default — a "
             "library-level guess here silently passes or silently fails "
             "somebody else's release.",
         )
@@ -406,12 +425,50 @@ def _validate_clock(payload: dict, *, kind: str, required: bool, ceiling: Option
             "happens.",
         )
 
+    default = _validate_default(payload.get("default"), on_timeout=on_timeout, kind=kind)
+
     return {
         "max_park_seconds": park,
         "on_timeout": on_timeout,
         "escalate_to": escalate_to.strip() if isinstance(escalate_to, str) else None,
         "verifier": verifier.strip() if named else None,
+        "default": default,
     }
+
+
+def _validate_default(default: Any, *, on_timeout: str, kind: str) -> Optional[dict]:
+    """`default` belongs to `on_timeout: proceed_on_default` and to nothing
+    else (v3.6). The option is what the run builds on, the consequence is what
+    that commits the work to, and the audience is who must be told — a default
+    nobody hears about is the invisible decision this field exists to prevent."""
+    if on_timeout != "proceed_on_default":
+        if default not in (None, "", {}):
+            _refuse(
+                GATE_INVALID,
+                f"default is set but on_timeout is {on_timeout!r}, so nothing would ever read it",
+                "Either set on_timeout='proceed_on_default', or drop default.",
+            )
+        return None
+    if kind != "human":
+        _refuse(
+            GATE_INVALID,
+            f"on_timeout='proceed_on_default' on a {kind!r} gate",
+            "Only a human gate asks a question with a default answer. A "
+            "deterministic or judged check that did not run did not pass; use "
+            "'fail' or 'escalate'.",
+        )
+    if not isinstance(default, dict) or set(default) != set(DEFAULT_FIELDS) or not all(
+        isinstance(default[f], str) and default[f].strip() for f in DEFAULT_FIELDS
+    ):
+        _refuse(
+            GATE_INVALID,
+            f"on_timeout='proceed_on_default' needs default {{{', '.join(DEFAULT_FIELDS)}}}, "
+            f"each a non-empty string; got {default!r}",
+            "Name the option the run will build on, what that commits the work "
+            "to, and who must be told. A default with no consequence or no "
+            "audience is a decision nobody owns.",
+        )
+    return {f: default[f].strip() for f in DEFAULT_FIELDS}
 
 
 def _validate_execution(payload: dict, *, kind: str) -> dict:
@@ -476,7 +533,43 @@ def _validate_execution(payload: dict, *, kind: str) -> dict:
             )
         judge_route = judge_route.strip()
 
-    return {"cwd": cwd, "timeout_s": timeout_s, "rubric": rubric, "judge_route": judge_route}
+    cannot_evaluate_exit = payload.get("cannot_evaluate_exit")
+    if cannot_evaluate_exit is not None:
+        if (isinstance(cannot_evaluate_exit, bool) or not isinstance(cannot_evaluate_exit, int)
+                or not 1 <= cannot_evaluate_exit <= 255):
+            _refuse(
+                GATE_INVALID,
+                f"cannot_evaluate_exit must be an exit status 1..255, got {cannot_evaluate_exit!r}",
+                "Give the exit status the check uses to say it could not "
+                "evaluate (3 by convention), or omit the key. 0 is a pass and "
+                "cannot also mean 'could not tell'.",
+            )
+        if kind != "deterministic":
+            _refuse(
+                GATE_INVALID,
+                f"cannot_evaluate_exit is set on a {kind!r} gate, so nothing would ever read it",
+                "Only a deterministic gate is judged by its exit status. Drop it.",
+            )
+
+    min_cases = payload.get("min_cases")
+    if min_cases is not None:
+        if isinstance(min_cases, bool) or not isinstance(min_cases, int) or min_cases < 1:
+            _refuse(
+                GATE_INVALID,
+                f"min_cases must be a positive integer, got {min_cases!r}",
+                "Give the fewest cases a run must execute for its exit 0 to "
+                "count, or omit the key. A suite that ran nothing evaluated "
+                "nothing.",
+            )
+        if kind != "deterministic":
+            _refuse(
+                GATE_INVALID,
+                f"min_cases is set on a {kind!r} gate, so nothing would ever read it",
+                "Only a deterministic gate counts the cases its command ran. Drop it.",
+            )
+
+    return {"cwd": cwd, "timeout_s": timeout_s, "rubric": rubric, "judge_route": judge_route,
+            "cannot_evaluate_exit": cannot_evaluate_exit, "min_cases": min_cases}
 
 
 def validate_attestation(payload: Any, *, gate: dict, submitted_by: str) -> dict:
@@ -600,6 +693,18 @@ def validate_attestation(payload: Any, *, gate: dict, submitted_by: str) -> dict
                 "Explain what the attested check or stage found and whether it passed.",
             )
 
+    cases_run = payload.get("cases_run")
+    if gate.get("min_cases") is not None or "cases_run" in payload:
+        if isinstance(cases_run, bool) or not isinstance(cases_run, int) or cases_run < 0:
+            _refuse(
+                ATTESTATION_INVALID,
+                f"cases_run must be a non-negative integer, got {cases_run!r}"
+                + (" — this gate declares min_cases, so the count is part of the evidence"
+                   if gate.get("min_cases") is not None else ""),
+                "Report how many cases the command actually executed. An exit "
+                "status alone cannot tell a green suite from an empty one.",
+            )
+
     environment = payload.get("environment")
     if not isinstance(environment, str) or not environment.strip():
         _refuse(
@@ -631,6 +736,8 @@ def validate_attestation(payload: Any, *, gate: dict, submitted_by: str) -> dict
     }
     if "verdict" in payload:
         normalised["verdict"] = {"passed": verdict["passed"], "reason": verdict["reason"].strip()}
+    if "cases_run" in payload:
+        normalised["cases_run"] = cases_run
     if staged:
         normalised["stage"] = stage
     return normalised
@@ -656,11 +763,77 @@ def gate_satisfied(gate: dict, attestations: Sequence[dict]) -> bool:
     Attestations are assumed already validated against this gate; this asks
     only whether the set of them is complete.
     """
-    passing = [a for a in attestations if attestation_passes(a)]
+    passing = [a for a in attestations if _evaluates(gate, a) == "passed"]
     staged = gate.get("checks")
     if not staged:
         return bool(passing)
     return {a.get("stage") for a in passing} >= set(range(len(staged)))
+
+
+def _evaluates(gate: dict, attestation: dict) -> str:
+    """One attestation's outcome under this gate: passed, failed or
+    cannot_evaluate. `cannot_evaluate` exists only for a gate that opted in:
+    its `cannot_evaluate_exit`, or an exit 0 that ran fewer than `min_cases`
+    cases — a suite that collected nothing evaluated nothing, and reading its
+    exit 0 as a pass is how an empty suite merges."""
+    ce = gate.get("cannot_evaluate_exit")
+    if ce is not None and attestation.get("exit_status") == ce:
+        return "cannot_evaluate"
+    floor = gate.get("min_cases")
+    if floor is not None and attestation.get("exit_status") == 0:
+        ran = attestation.get("cases_run")
+        if isinstance(ran, bool) or not isinstance(ran, int) or ran < floor:
+            return "cannot_evaluate"
+    return "passed" if attestation_passes(attestation) else "failed"
+
+
+def gate_outcome(gate: dict, attestations: Sequence[dict]) -> str:
+    """Which of `GATE_OUTCOMES` these attestations reach (ASOP.md §5.2, v3.6).
+
+    `passed` exactly when `gate_satisfied` is true. Otherwise the first rung
+    (in ladder order) that is not passed decides: `failed` or
+    `cannot_evaluate` from its latest attestation, `incomplete` when it has
+    none. Only `passed` releases dependents. `cannot_evaluate` is never
+    charged to the executor: it says the check could not judge the work, not
+    that the work was wrong — the engine re-files whatever could not be
+    evaluated (an entry failure, §3.8), never counts it toward §5.4's budget.
+    Attestations are assumed already validated against this gate."""
+    if gate_satisfied(gate, attestations):
+        return "passed"
+    staged = gate.get("checks")
+    rungs = range(len(staged)) if staged else [None]
+    for rung in rungs:
+        mine = [a for a in attestations if not staged or a.get("stage") == rung]
+        if any(_evaluates(gate, a) == "passed" for a in mine):
+            continue
+        if not mine:
+            return "incomplete"
+        return _evaluates(gate, mine[-1])
+    return "incomplete"  # unreachable: every rung passed is gate_satisfied
+
+
+def timeout_resolution(gate: dict) -> dict:
+    """What a park clock's expiry does to an unanswered gate (§5.2, §9).
+
+    - `pass`               → `{"status": "done"}`
+    - `fail`               → `{"status": "verify_failed"}`
+    - `escalate`           → `{"status": "escalated", "escalate_to": ...}`
+    - `proceed_on_default` → `{"status": "done", "on_default": {option, consequence, audience}}`
+      (v3.6): dependents are released, built on the declared option, and the
+      engine records the default as taken. A late answer that differs makes
+      every run built on it stale (§5.7).
+
+    The gate must be normalised and declare its clock."""
+    on_timeout = gate.get("on_timeout")
+    if on_timeout == "pass":
+        return {"status": "done"}
+    if on_timeout == "fail":
+        return {"status": "verify_failed"}
+    if on_timeout == "escalate":
+        return {"status": "escalated", "escalate_to": gate["escalate_to"]}
+    if on_timeout == "proceed_on_default":
+        return {"status": "done", "on_default": dict(gate["default"])}
+    raise ValueError("timeout_resolution needs a gate that declares its park clock")
 
 
 def retry_decision(failures: int) -> str:

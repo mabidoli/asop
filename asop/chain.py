@@ -55,7 +55,7 @@ CARDINALITIES = ("one", "many")
 
 # Closed. A predicate an engine cannot evaluate identically to another engine is
 # a fork of the contract, so the list grows by spec version, never by author.
-REQUIRE_KINDS = ("run_done", "human_approved")
+REQUIRE_KINDS = ("run_done", "human_approved", "chain_gate")
 
 # Predicates one engine used that are deliberately NOT ASOP data, each with
 # where it lives instead. Named so the refusal says where to put it rather than
@@ -83,7 +83,27 @@ HANDOFF_RULES: dict[str, str] = {
     "inputs": "the successor's declared inputs are not exactly satisfied by scalar values",
     "version": "no ACTIVE version of the successor falls inside the declared version range",
     "conflict": "a run with this natural key was already filed with different inputs",
+    # v3.6
+    "order": "a fan-out's dependency field (`order_by`) names a subject the hand-off does not file, or the dependencies form a cycle",
+    "approval": "a fan-out over an approved subset has no approval binding the output's current digest, or the approval names a subject the output does not contain",
 }
+
+# Rework (§3.9, v3.6): a declared, bounded edge that sends work back — to an
+# earlier step of this procedure, or to the upstream procedure that owns a
+# finding. Same shape of code as hand-offs: the class, then the rule.
+REWORK_REFUSED = "rework_refused"
+REWORK_RULES: dict[str, str] = {
+    "undeclared": "the rework names an edge this ASOP does not declare, or an edge the trigger does not match",
+    "version": "no version of the rework target is available (outside the declared range, or not pinned by the chain)",
+    "findings": "the findings output a rework carries is missing, or not a scalar reference",
+    "owner": "the engine named no upstream run for a rework to a procedure, so there is nothing to re-file",
+}
+
+#: Rounds a rework edge may declare. A rework edge is an autonomous loop with no
+#: person in it; §5.4 already allows one repair before a person, and three
+#: rounds is the most this contract lets a procedure spend before a person
+#: looks. Exhausting the rounds escalates (§5.4) — it never loops on.
+MAX_REWORK_ROUNDS = 3
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _RANGE = re.compile(r">=([1-9][0-9]*)(?:,<([1-9][0-9]*))?")
@@ -272,7 +292,8 @@ def _input_map(raw: Any, what: str, **kw) -> dict:
 def _subject_from(raw: Any, what: str, outputs: set[str]) -> dict:
     if not isinstance(raw, dict):
         raise ChainContractError(f"{what} must be {{output, array, id_field, where?, where_not?}}.")
-    extra = set(raw) - {"output", "array", "id_field", "where", "where_not"}
+    extra = set(raw) - {"output", "array", "id_field", "where", "where_not",
+                        "order_by", "concurrency", "approved_subset"}   # the last three: v3.6
     if extra:
         raise ChainContractError(f"{what}: unknown field(s) {', '.join(sorted(map(str, extra)))}.")
     out = {k: _ident(raw.get(k), f"{what}.{k}") for k in ("output", "array", "id_field")}
@@ -305,6 +326,23 @@ def _subject_from(raw: Any, what: str, outputs: set[str]) -> dict:
                 raise ChainContractError(f"{what}.where_not.{k} must be a scalar.")
             clean[_ident(k, f"{what}.where_not key")] = v
         out["where_not"] = clean
+    if raw.get("order_by") is not None:
+        out["order_by"] = _ident(raw["order_by"], f"{what}.order_by")
+        if out["order_by"] == out["id_field"]:
+            raise ChainContractError(f"{what}.order_by names the id field; it names the field that lists "
+                                     f"each item's dependencies.")
+    if raw.get("concurrency") is not None:
+        c = raw["concurrency"]
+        if isinstance(c, bool) or not isinstance(c, int) or c < 1:
+            raise ChainContractError(f"{what}.concurrency must be a positive integer, got {c!r}.")
+        out["concurrency"] = c
+    if raw.get("approved_subset") is not None:
+        if raw["approved_subset"] is not True:
+            raise ChainContractError(
+                f"{what}.approved_subset must be true or absent. When true, only the subjects a person "
+                f"approved, in an approval that binds the output's current digest, are filed."
+            )
+        out["approved_subset"] = True
     return out
 
 
@@ -312,17 +350,20 @@ def _subject_from(raw: Any, what: str, outputs: set[str]) -> dict:
 # authoring: one record
 # ---------------------------------------------------------------------------
 
-CHAIN_FIELDS = ("outcomes", "outputs", "handoffs", "on_escalate", "requires")
+CHAIN_FIELDS = ("outcomes", "outputs", "handoffs", "on_escalate", "requires",
+                "entry_gates", "rework")   # v3.6
 
 
 def validate_chain_fields(payload: dict, *, asop_id: Optional[str] = None,
-                          input_names: Iterable[str] = ()) -> dict:
+                          input_names: Iterable[str] = (), steps: Optional[int] = None) -> dict:
     """Normalise the five optional chaining fields of an ASOP body. Returns only
     the fields present. Raises `ChainContractError`; never repairs.
 
     `asop_id` is the record's own id when known (a store knows it; a bare body
     may not) — it is used to refuse direct self-reference. Longer cycles need
-    the other records: `validate_handoff_targets`."""
+    the other records: `validate_handoff_targets`. `steps` is the record's
+    step count when known, so a rework edge to a step that does not exist is
+    refused here (v3.6)."""
     out: dict = {}
     inputs = set(input_names)
 
@@ -350,7 +391,8 @@ def validate_chain_fields(payload: dict, *, asop_id: Optional[str] = None,
             what = f"'handoffs'[{i}]"
             if not isinstance(h, dict):
                 raise ChainContractError(f"{what} must be a mapping.")
-            extra = set(h) - {"id", "to", "on_outcomes", "cardinality", "subject_from", "inputs", "after"}
+            extra = set(h) - {"id", "to", "on_outcomes", "cardinality", "subject_from", "inputs", "after",
+                              "preflight"}
             if extra:
                 raise ChainContractError(f"{what}: unknown field(s) {', '.join(sorted(map(str, extra)))}.")
             hid = _ident(h.get("id"), f"{what}.id")
@@ -430,6 +472,11 @@ def validate_chain_fields(payload: dict, *, asop_id: Optional[str] = None,
                 clean["after"] = cleaned_after
             clean["inputs"] = _input_map(h.get("inputs"), f"{what}.inputs", inputs=inputs, outputs=outputs,
                                          subject_ok=(card == "many"))
+            if h.get("preflight") is not None:
+                if not isinstance(h["preflight"], bool):
+                    raise ChainContractError(f"{what}.preflight must be a boolean, got {h['preflight']!r}.")
+                if h["preflight"]:
+                    clean["preflight"] = True
             handoffs.append(clean)
         out["handoffs"] = handoffs
 
@@ -471,12 +518,227 @@ def validate_chain_fields(payload: dict, *, asop_id: Optional[str] = None,
                 if asop_id is not None and ref == asop_id:
                     raise ChainContractError(f"{what}: a procedure cannot wait on its own runs.")
                 reqs.append({"kind": kind, "asop_id": ref})
-            else:  # human_approved
-                if set(r) != {"kind", "artefact"}:
-                    raise ChainContractError(f"{what}: 'human_approved' takes exactly {{kind, artefact}}.")
-                reqs.append({"kind": kind, "artefact": _ident(r["artefact"], f"{what}.artefact")})
+            elif kind == "human_approved":
+                if not {"kind", "artefact"} <= set(r) or set(r) - {"kind", "artefact", "binds_digest"}:
+                    raise ChainContractError(
+                        f"{what}: 'human_approved' takes {{kind, artefact, binds_digest?}}."
+                    )
+                req = {"kind": kind, "artefact": _ident(r["artefact"], f"{what}.artefact")}
+                if r.get("binds_digest") is not None:
+                    if not isinstance(r["binds_digest"], bool):
+                        raise ChainContractError(f"{what}.binds_digest must be a boolean.")
+                    if r["binds_digest"]:
+                        req["binds_digest"] = True
+                reqs.append(req)
+            else:  # chain_gate (v3.6)
+                if set(r) != {"kind", "id", "gate"}:
+                    raise ChainContractError(f"{what}: 'chain_gate' takes exactly {{kind, id, gate}}.")
+                gid = _ident(r["id"], f"{what}.id")
+                if any(x.get("kind") == "chain_gate" and x["id"] == gid for x in reqs):
+                    raise ChainContractError(f"'requires' declares chain gate '{gid}' twice.")
+                reqs.append({"kind": kind, "id": gid,
+                             "gate": _deterministic_gate(r["gate"], f"{what}.gate")})
         out["requires"] = reqs
 
+    if payload.get("entry_gates") is not None:
+        out["entry_gates"] = _entry_gates(payload["entry_gates"], inputs)
+
+    if payload.get("rework") is not None:
+        out["rework"] = _rework_edges(payload["rework"], asop_id=asop_id, outcomes=outcomes,
+                                      outputs=outputs, handoffs=out.get("handoffs", []), steps=steps)
+
+    return out
+
+
+def _deterministic_gate(raw: Any, what: str) -> dict:
+    """A gate the ENGINE runs over documents — an entry gate, a chain gate.
+    Normalised by the shared gate schema, and deterministic only: a judge or a
+    person reached through an entry gate would be a step nobody declared."""
+    from asop.errors import Refusal
+    from asop.gates import validate_gate
+    try:
+        gate = validate_gate(raw)
+    except Refusal as e:
+        raise ChainContractError(f"{what} is not a valid gate — {e.message}") from e
+    if gate["kind"] != "deterministic":
+        raise ChainContractError(
+            f"{what} is kind '{gate['kind']}'. An entry or chain gate is run by the engine over "
+            f"documents, so it is deterministic; a judgment or a sign-off is a step."
+        )
+    return gate
+
+
+def _entry_gates(raw: Any, inputs: set[str]) -> list[dict]:
+    """`entry_gates: [{id, over: [declared input], gate}]` (§3.8, v3.6) — the
+    consumer's precondition over what it is handed, or over a source it is
+    given at chain start (a readiness gate). Evaluated before the run may
+    start; never a step, never charged to this run's executor."""
+    items = _list(raw, "'entry_gates'", "Omit it for a procedure that checks nothing before it starts.")
+    out: list[dict] = []
+    seen: set[str] = set()
+    for i, g in enumerate(items):
+        what = f"'entry_gates'[{i}]"
+        if not isinstance(g, dict):
+            raise ChainContractError(f"{what} must be a mapping {{id, over, gate}}.")
+        extra = set(g) - {"id", "over", "gate"}
+        if extra:
+            raise ChainContractError(f"{what}: unknown field(s) {', '.join(sorted(map(str, extra)))}.")
+        gid = _ident(g.get("id"), f"{what}.id")
+        if not _ID.fullmatch(gid):
+            raise ChainContractError(f"{what}.id '{gid}' must be letters, digits, '.', '_' or '-'.")
+        if gid in seen:
+            raise ChainContractError(f"'entry_gates' declares id '{gid}' twice.")
+        seen.add(gid)
+        over: list[str] = []
+        for name in _list(g.get("over"), f"entry gate '{gid}'.over",
+                          "Name the declared inputs this gate reads; a gate over nothing checks nothing."):
+            name = _ident(name, f"entry gate '{gid}'.over entry")
+            if name not in inputs:
+                raise ChainContractError(
+                    f"entry gate '{gid}' reads input '{name}', which this ASOP does not declare "
+                    f"(declared: {', '.join(sorted(inputs)) or 'none'}). An entry gate checks what the "
+                    f"run is handed, so it may read only declared inputs."
+                )
+            if name in over:
+                raise ChainContractError(f"entry gate '{gid}'.over names '{name}' twice.")
+            over.append(name)
+        out.append({"id": gid, "over": over, "gate": _deterministic_gate(g.get("gate"), f"entry gate '{gid}'.gate")})
+    return out
+
+
+def _rework_edges(raw: Any, *, asop_id: Optional[str], outcomes: list[str], outputs: set[str],
+                  handoffs: list[dict], steps: Optional[int]) -> list[dict]:
+    """`rework: [...]` (§3.9, v3.6). Two shapes:
+
+    - to an EARLIER STEP of this procedure: `{id, to: {step: n}, on_step_failure: k,
+      max_rounds, consumes_attempt, tier_bump?}`, k > n — when step k's gate
+      fails, re-execute steps n..k instead of repairing k alone;
+    - to an UPSTREAM PROCEDURE: `{id, to: {asop_id, version|versions}, on_outcomes,
+      findings?, max_rounds, consumes_attempt, tier_bump?}` — when this run
+      finishes with one of those outcomes, re-file the upstream run that owns the
+      finding as its next attempt, carrying `findings` as its prior findings.
+
+    `consumes_attempt` has no default: whether a round spends §5.4's budget is
+    a decision, and a library-level guess would make it for somebody else."""
+    items = _list(raw, "'rework'", "Omit it for a procedure that sends nothing back.")
+    out: list[dict] = []
+    seen: set[str] = set()
+    triggers: dict[Any, str] = {}
+    fired_forward = {o for h in handoffs for o in h.get("on_outcomes", outcomes)}
+    if any("on_outcomes" not in h for h in handoffs):
+        fired_forward = set(outcomes)
+    for i, e in enumerate(items):
+        what = f"'rework'[{i}]"
+        if not isinstance(e, dict):
+            raise ChainContractError(f"{what} must be a mapping.")
+        extra = set(e) - {"id", "to", "on_outcomes", "on_step_failure", "findings", "max_rounds",
+                          "consumes_attempt", "tier_bump"}
+        if extra:
+            raise ChainContractError(f"{what}: unknown field(s) {', '.join(sorted(map(str, extra)))}.")
+        rid = _ident(e.get("id"), f"{what}.id")
+        if not _ID.fullmatch(rid):
+            raise ChainContractError(f"{what}.id '{rid}' must be letters, digits, '.', '_' or '-'.")
+        if rid in seen:
+            raise ChainContractError(f"'rework' declares id '{rid}' twice.")
+        seen.add(rid)
+        what = f"rework '{rid}'"
+        to = e.get("to")
+        clean: dict = {"id": rid}
+        if isinstance(to, dict) and set(to) == {"step"}:
+            n = to["step"]
+            if isinstance(n, bool) or not isinstance(n, int) or n < 1 or (steps is not None and n > steps):
+                raise ChainContractError(f"{what}.to.step must be a step of this ASOP, got {n!r}.")
+            k = e.get("on_step_failure")
+            if isinstance(k, bool) or not isinstance(k, int) or (steps is not None and k > steps):
+                raise ChainContractError(
+                    f"{what} reworks a step, so 'on_step_failure' names the step of this ASOP whose gate "
+                    f"failure triggers it, got {k!r}."
+                )
+            if k <= n:
+                raise ChainContractError(
+                    f"{what}: step {k} failing re-executes step {n}, which is not earlier. A failing "
+                    f"step re-running itself is a repair (§5.4), not rework."
+                )
+            for bad in ("on_outcomes", "findings"):
+                if e.get(bad) is not None:
+                    raise ChainContractError(
+                        f"{what} reworks a step, so '{bad}' has nothing to read: the trigger is a "
+                        f"gate failure inside the run, and the findings are that gate's attestation."
+                    )
+            clean["to"] = {"step": n}
+            clean["on_step_failure"] = k
+            key = ("step", k)
+        else:
+            clean["to"] = _target(to, f"{what}.to")
+            if asop_id is not None and clean["to"]["asop_id"] == asop_id:
+                raise ChainContractError(
+                    f"{what} reworks its own ASOP. Rework inside a procedure targets a step "
+                    f"(`to: {{step: n}}`)."
+                )
+            if e.get("on_step_failure") is not None:
+                raise ChainContractError(
+                    f"{what} reworks a procedure, so its trigger is an outcome of this run "
+                    f"('on_outcomes'), not a step failure."
+                )
+            oo = _list(e.get("on_outcomes"), f"{what}.on_outcomes",
+                       "Name the outcomes of this run that send the work back.")
+            if not outcomes:
+                raise ChainContractError(f"{what}.on_outcomes names outcomes, but the ASOP declares no 'outcomes'.")
+            cleaned: list[str] = []
+            for o in oo:
+                o = _ident(o, f"{what}.on_outcomes entry")
+                if o not in outcomes:
+                    raise ChainContractError(f"{what}.on_outcomes names '{o}', which is not a declared outcome.")
+                if o in fired_forward:
+                    raise ChainContractError(
+                        f"{what} fires on '{o}', and so does a hand-off. A run that sends its work back "
+                        f"does not also send it forward: give the rework its own outcome."
+                    )
+                if o in cleaned:
+                    raise ChainContractError(f"{what}.on_outcomes names '{o}' twice.")
+                cleaned.append(o)
+            clean["on_outcomes"] = cleaned
+            if e.get("findings") is not None:
+                f = _ident(e["findings"], f"{what}.findings")
+                if f not in outputs:
+                    raise ChainContractError(
+                        f"{what}.findings '{f}' is not a declared output. The findings a rework carries "
+                        f"upstream are something this procedure promises to write."
+                    )
+                clean["findings"] = f
+            key = None
+            for o in cleaned:
+                if ("outcome", o) in triggers:
+                    raise ChainContractError(
+                        f"{what} and rework '{triggers[('outcome', o)]}' both fire on '{o}'. One trigger, "
+                        f"one edge: which owner is re-filed must not depend on order."
+                    )
+                triggers[("outcome", o)] = rid
+        if key is not None:
+            if key in triggers:
+                raise ChainContractError(
+                    f"{what} and rework '{triggers[key]}' both fire when step {key[1]} fails. One trigger, one edge."
+                )
+            triggers[key] = rid
+        rounds = e.get("max_rounds")
+        if isinstance(rounds, bool) or not isinstance(rounds, int) or not 1 <= rounds <= MAX_REWORK_ROUNDS:
+            raise ChainContractError(
+                f"{what}.max_rounds must be an integer 1..{MAX_REWORK_ROUNDS}, got {rounds!r}. A rework edge is "
+                f"a loop with no person in it, so it is bounded; exhausting it escalates (§5.4)."
+            )
+        clean["max_rounds"] = rounds
+        if not isinstance(e.get("consumes_attempt"), bool):
+            raise ChainContractError(
+                f"{what}.consumes_attempt must be true or false. Whether a round spends §5.4's budget is the "
+                f"author's decision; there is deliberately no default."
+            )
+        clean["consumes_attempt"] = e["consumes_attempt"]
+        if e.get("tier_bump") is not None:
+            if not isinstance(e["tier_bump"], bool):
+                raise ChainContractError(f"{what}.tier_bump must be a boolean.")
+            if e["tier_bump"]:
+                clean["tier_bump"] = True
+        out.append(clean)
     return out
 
 
@@ -553,6 +815,34 @@ def validate_handoff_targets(body: dict, resolve: Resolver, *, asop_id: str) -> 
             raise ChainContractError(
                 f"'requires' waits on '{r['asop_id']}', which this ASOP itself (transitively) hands off to. "
                 f"Those runs can only be filed after this one finishes, so it would wait forever."
+            )
+    # v3.6: a preflight runs the consumer's entry gates, so the consumer must have some.
+    for h in body.get("handoffs", []):
+        if h.get("preflight") and not _resolve_or_raise(h["to"], f"hand-off '{h['id']}'", resolve).get("entry_gates"):
+            raise ChainContractError(
+                f"hand-off '{h['id']}' asks for a preflight, but '{h['to']['asop_id']}' declares no entry gates. "
+                f"A preflight runs the consumer's lint; with none, it would check nothing and look like it did."
+            )
+    # v3.6: a rework edge to a procedure goes UPSTREAM — to one that leads here.
+    # Otherwise it is a hand-off wearing a loop's name, and escapes the cycle ban.
+    for e in body.get("rework", []):
+        if "asop_id" not in e["to"]:
+            continue
+        found = resolve(e["to"])
+        if found is None:
+            raise ChainContractError(
+                f"rework '{e['id']}': no ACTIVE version of '{e['to']['asop_id']}' matches "
+                f"{e['to'].get('version') or e['to'].get('versions')}."
+            )
+        try:
+            upstream_reaches = _walk_handoffs(found[1], resolve, e["to"]["asop_id"])
+        except ChainContractError:
+            upstream_reaches = set()
+        if asop_id not in upstream_reaches:
+            raise ChainContractError(
+                f"rework '{e['id']}' targets '{e['to']['asop_id']}', which does not (transitively) hand off "
+                f"to '{asop_id}'. Rework sends work back to the procedure that produced it; a filing anywhere "
+                f"else is a hand-off, and must be declared as one."
             )
 
 
@@ -741,7 +1031,8 @@ def _filed_map(existing: Any) -> dict:
 
 def plan_handoffs(body: dict, *, outcome: Optional[str], outputs: Mapping, run_inputs: Mapping,
                   requests: Any, resolve: Resolver, chain: str,
-                  existing: Any = (), attempt: int = 1) -> list[dict]:
+                  existing: Any = (), attempt: int = 1,
+                  approvals: Optional[Mapping] = None, output_digests: Optional[Mapping] = None) -> list[dict]:
     """What a finished run files. `body` is the filing ASOP's validated body.
 
     Returns decisions in a normative order — the run's outcome first, then each
@@ -772,6 +1063,17 @@ def plan_handoffs(body: dict, *, outcome: Optional[str], outputs: Mapping, run_i
       it re-files downstream of a stale input. `existing` holds what was filed
       before (key -> inputs); the same key with different inputs is a
       `conflict`, refused.
+
+    v3.6, all opt-in by declaration on `subject_from`:
+    - `approved_subset`: only subjects in a person's approval are yielded.
+      `approvals` maps an output name to `{digest, subset?}`, and
+      `output_digests` maps it to the digest of what was written; an approval
+      whose digest is not the current one approves something else, and the
+      hand-off is refused (`approval`). `subset` absent approves every subject;
+    - `order_by`: each `file` decision carries `depends_on`, the natural keys
+      of the subjects its item lists. A dependency the hand-off does not file,
+      or a cycle, is refused (`order`); `fanout_startable` decides which may
+      start, within `concurrency`.
     """
     decisions: list[dict] = []
     filed = _filed_map(existing)
@@ -821,7 +1123,8 @@ def plan_handoffs(body: dict, *, outcome: Optional[str], outputs: Mapping, run_i
             decisions.append({"action": "wait", "handoff": h["id"], "after": list(h["after"])})
             continue
         _file_handoff(decisions, filed, h, reqs, outputs=outputs, run_inputs=run_inputs,
-                      resolve=resolve, chain=chain, attempt=attempt)
+                      resolve=resolve, chain=chain, attempt=attempt,
+                      approvals=approvals, output_digests=output_digests)
     return decisions
 
 
@@ -837,7 +1140,8 @@ def _check_one_requests(decisions: list, h: dict, reqs: list) -> None:
 
 
 def _file_handoff(decisions: list, filed: dict, h: dict, reqs: list, *, outputs: Mapping,
-                  run_inputs: Mapping, resolve: Resolver, chain: str, attempt: int) -> None:
+                  run_inputs: Mapping, resolve: Resolver, chain: str, attempt: int,
+                  approvals: Optional[Mapping] = None, output_digests: Optional[Mapping] = None) -> None:
     """File one fired hand-off: resolve its target, expand its subjects, compute
     its inputs, and file or refuse each unit."""
     found = resolve(h["to"])
@@ -858,6 +1162,14 @@ def _file_handoff(decisions: list, filed: dict, h: dict, reqs: list, *, outputs:
             decisions.append(_refuse("output", f"hand-off '{h['id']}': {e.args[0]}", handoff=h["id"],
                                      toward=[h["to"]["asop_id"]]))
             return
+        if h["subject_from"].get("approved_subset"):
+            subset = _approved_subset(h, outputs, approvals, output_digests)
+            if isinstance(subset, str):
+                decisions.append(_refuse("approval", f"hand-off '{h['id']}': {subset}", handoff=h["id"],
+                                         toward=[h["to"]["asop_id"]]))
+                return
+            if subset is not None:
+                pairs = [p for p in pairs if p[0] in subset]
         items = dict(pairs)
         accepted: list[tuple[str, dict]] = []
         for i, req in reqs:
@@ -869,6 +1181,19 @@ def _file_handoff(decisions: list, filed: dict, h: dict, reqs: list, *, outputs:
                 continue
             accepted.append((sid, items[sid]))
         units = accepted or pairs
+        if "order_by" in h["subject_from"]:
+            problem = _order_problem(h, units)
+            if problem and accepted:
+                # The REQUESTS narrowed the fan-out into an order it cannot keep. A refused
+                # request is as if it had not been written: refuse them, file the declaration.
+                decisions.append(_refuse("order", f"hand-off '{h['id']}': the requested subjects {problem}; "
+                                                  f"the requests are disregarded", handoff=h["id"]))
+                units = pairs
+                problem = _order_problem(h, units)
+            if problem:
+                decisions.append(_refuse("order", f"hand-off '{h['id']}': {problem}", handoff=h["id"],
+                                         toward=[h["to"]["asop_id"]]))
+                return
 
     for subject, item in units:
         try:
@@ -884,6 +1209,116 @@ def _file_handoff(decisions: list, filed: dict, h: dict, reqs: list, *, outputs:
             continue
         _file_or_dup(decisions, filed, handoff=h["id"], to=h["to"], version=version, subject=subject,
                      inputs=inputs, chain=chain, attempt=attempt)
+        if item is not None and "order_by" in h["subject_from"] and decisions[-1]["action"] == "file":
+            decisions[-1]["depends_on"] = [natural_key(chain, h["to"]["asop_id"], d, attempt)
+                                           for d in _deps(item, h["subject_from"]["order_by"])]
+
+
+def _deps(item: dict, field: str) -> list[str]:
+    raw = item.get(field, [])
+    if not isinstance(raw, list) or any(isinstance(d, bool) or not isinstance(d, (str, int)) for d in raw):
+        raise ValueError(f"'{field}' must be a list of subject ids")
+    out: list[str] = []
+    for d in raw:
+        if str(d) not in out:
+            out.append(str(d))
+    return out
+
+
+def _order_problem(h: dict, units: list) -> Optional[str]:
+    """Why these units cannot be filed in dependency order, or None."""
+    field = h["subject_from"]["order_by"]
+    filed = [s for s, _ in units]
+    graph: dict[str, list[str]] = {}
+    for subject, item in units:
+        try:
+            deps = _deps(item, field)
+        except ValueError as e:
+            return f"subject '{subject}': {e.args[0]}"
+        for d in deps:
+            if d == subject:
+                return f"subject '{subject}' depends on itself"
+            if d not in filed:
+                return f"subject '{subject}' depends on '{d}', which this hand-off does not file"
+        graph[subject] = deps
+    state: dict[str, int] = {}
+
+    def visit(n: str) -> Optional[str]:
+        state[n] = 1
+        for d in graph[n]:
+            if state.get(d) == 1:
+                return f"dependencies form a cycle through '{n}' and '{d}'"
+            if d not in state:
+                found = visit(d)
+                if found:
+                    return found
+        state[n] = 2
+        return None
+
+    for n in filed:
+        if n not in state:
+            found = visit(n)
+            if found:
+                return found
+    return None
+
+
+def _approved_subset(h: dict, outputs: Mapping, approvals: Optional[Mapping],
+                     output_digests: Optional[Mapping]) -> Any:
+    """The approved subjects (a set), None for 'all approved', or a string
+    saying why there is no usable approval."""
+    name = h["subject_from"]["output"]
+    approval = (approvals or {}).get(name)
+    current = (output_digests or {}).get(name)
+    if not isinstance(approval, Mapping):
+        return f"output '{name}' has no approval"
+    digest = approval.get("digest")
+    if not isinstance(digest, str) or not digest.strip() or not isinstance(current, str):
+        return f"the approval of output '{name}' binds no digest the engine can compare"
+    if digest != current:
+        return (f"the approval of output '{name}' binds {digest}, but the output is now {current}: "
+                f"it approved something else, and is stale")
+    subset = approval.get("subset")
+    if subset is None:
+        return None
+    if not isinstance(subset, list) or any(isinstance(x, bool) or not isinstance(x, (str, int)) for x in subset):
+        return f"the approval of output '{name}' has a subset that is not a list of subject ids"
+    subset = {str(x) for x in subset}
+    try:
+        everything = _dig(outputs[name], h["subject_from"]["array"])
+        ids = {str(i.get(h["subject_from"]["id_field"])) for i in everything if isinstance(i, dict)}
+    except (KeyError, TypeError):
+        ids = set()
+    unknown = sorted(subset - ids)
+    if unknown:
+        return f"the approval of output '{name}' names {', '.join(unknown)}, which the output does not contain"
+    return subset
+
+
+def fanout_startable(handoff: dict, decisions: Iterable[Mapping], *, done: Iterable[str] = (),
+                     started: Iterable[str] = ()) -> list[str]:
+    """Which runs a fan-out filed may START now (§3.7, v3.6), in filing order.
+
+    `handoff` is the validated hand-off; `decisions` are the parent run's
+    recorded decisions; `started` holds natural keys whose run has started
+    (running or finished) and `done` those finished done. A run may start when
+    it has not started, every key in its `depends_on` is done, and starting it
+    keeps the hand-off's running runs within `subject_from.concurrency`. A run
+    whose dependency failed never becomes startable; the join over this
+    hand-off is blocked (`join_state`), and that goes to a person."""
+    done, started = set(done), set(started)
+    mine = [d for d in decisions if d.get("handoff") == handoff["id"] and d.get("action") == "file"]
+    limit = handoff.get("subject_from", {}).get("concurrency")
+    running = sum(1 for d in mine if d["natural_key"] in started and d["natural_key"] not in done)
+    out: list[str] = []
+    for d in mine:
+        key = d["natural_key"]
+        if key in started or not all(k in done for k in d.get("depends_on", [])):
+            continue
+        if limit is not None and running + len(out) >= limit:
+            break
+        out.append(key)
+    return out
 
 
 def join_state(after: Iterable[str], *, decisions: Iterable[Mapping], done: Iterable[str] = (),
@@ -1027,7 +1462,8 @@ def plan_escalation(body: dict, *, subject: str, run_inputs: Mapping, context: M
 # ---------------------------------------------------------------------------
 
 def requires_satisfied(requires: list[dict], *, chain: str, runs: Iterable[Mapping],
-                       approved: Iterable[str] = ()) -> bool:
+                       approved: Iterable[str] = (), approvals: Optional[Mapping] = None,
+                       digests: Optional[Mapping] = None, chain_gates: Optional[Mapping] = None) -> bool:
     """May a filed run start? Every predicate must hold, within ONE chain.
 
     `runs` are this chain's runs as `{asop_id, subject, attempt, done}`.
@@ -1043,7 +1479,15 @@ def requires_satisfied(requires: list[dict], *, chain: str, runs: Iterable[Mappi
     `requires` is a START condition. A later attempt of X, filed after this
     run started, does not un-start it; that is staleness, which the engine
     handles by lineage (§3.7). A run whose `requires` never hold is held, and
-    the engine's liveness clock surfaces it to a person."""
+    the engine's liveness clock surfaces it to a person.
+
+    v3.6:
+    - `human_approved(A, binds_digest)`: the approval must bind A's CURRENT
+      digest — `approvals[A]["digest"] == digests[A]`. An approval of an
+      earlier A approved something else. Without the digests this fails closed;
+    - `chain_gate(id)`: the engine ran the chain-level gate over the run
+      ledger and `chain_gates[id]` is `"passed"`. `failed`, `cannot_evaluate`
+      and absent all hold the run."""
     latest: dict[str, Mapping] = {}
     for r in runs:
         if str(r["subject"]) != chain:
@@ -1051,13 +1495,161 @@ def requires_satisfied(requires: list[dict], *, chain: str, runs: Iterable[Mappi
         a = r["asop_id"]
         if a not in latest or r.get("attempt", 1) > latest[a].get("attempt", 1):
             latest[a] = r
-    ok = set(approved)
+    ok = set(approved) | set(approvals or {})
     for req in requires:
         if req["kind"] == "human_approved":
             if req["artefact"] not in ok:
+                return False
+            if req.get("binds_digest"):
+                rec = (approvals or {}).get(req["artefact"])
+                current = (digests or {}).get(req["artefact"])
+                if (not isinstance(rec, Mapping) or not isinstance(rec.get("digest"), str)
+                        or not isinstance(current, str) or rec["digest"] != current):
+                    return False
+        elif req["kind"] == "chain_gate":
+            if (chain_gates or {}).get(req["id"]) != "passed":
                 return False
         else:
             r = latest.get(req["asop_id"])
             if r is None or not r["done"]:
                 return False
     return True
+
+
+# ---------------------------------------------------------------------------
+# v3.6: entry gates (§3.8) and rework (§3.9)
+# ---------------------------------------------------------------------------
+
+ENTRY_ACTIONS = ("start", "wait", "not_ready")
+
+
+def plan_entry(entry_gates: Iterable[Mapping], *, outcomes: Mapping, producers: Mapping) -> dict:
+    """May a filed run start, as far as its entry gates are concerned? (§3.8)
+
+    `entry_gates` is the record's validated list; `outcomes` maps a gate id to
+    the outcome the engine's run of it reached (`asop.gates.GATE_OUTCOMES`);
+    `producers` maps each declared input to the natural key of the run that
+    handed it on, or None when it was supplied at chain start (a source).
+
+    - `{"action": "start"}` when every entry gate passed;
+    - `{"action": "wait"}` while one has not been evaluated and none refused;
+    - `{"action": "not_ready", "refile": [...], "hold": [...]}` otherwise:
+      - a gate over an input a PREDECESSOR handed on re-files that producer as
+        its next attempt — `charged: true` when the gate `failed` (the
+        producer's output broke the declared contract, which §5.4 counts
+        against the producer), `charged: false` when it `cannot_evaluate`;
+      - a gate over a SOURCE holds the run for a person (`source_not_ready`
+        or `source_rejected`): there is no producer in the chain to re-file,
+        and a change of the source re-evaluates it (§5.7).
+
+    The consumer is never charged either way: it did not start, so it did not
+    fail, and no attempt of it is consumed. Dependents are never released."""
+    refile: dict[str, dict] = {}
+    hold: list[dict] = []
+    waiting = False
+    for g in entry_gates:
+        got = outcomes.get(g["id"])
+        if got == "passed":
+            continue
+        if got not in ("failed", "cannot_evaluate"):
+            waiting = True
+            continue
+        for name in g["over"]:
+            producer = producers.get(name)
+            if producer is None:
+                hold.append({"gate": g["id"], "input": name,
+                             "reason": "source_not_ready" if got == "cannot_evaluate" else "source_rejected"})
+            else:
+                prev = refile.get(producer)
+                charged = got == "failed" or bool(prev and prev["charged"])
+                gates = (prev["gates"] if prev else []) + ([g["id"]] if not prev or g["id"] not in prev["gates"] else [])
+                refile[producer] = {"natural_key": producer, "gates": gates, "charged": charged}
+    if refile or hold:
+        return {"action": "not_ready", "refile": list(refile.values()), "hold": hold}
+    return {"action": "wait"} if waiting else {"action": "start"}
+
+
+def preflight_checks(body: dict, resolve: Resolver) -> list[dict]:
+    """The consumer's lint, for the producer to run (§3.8, v3.6).
+
+    For every hand-off declaring `preflight: true`, the entry gates of the
+    target it would file, with the input mapping that feeds them. The engine
+    runs these before the producer's run is recorded done; one that does not
+    pass fails the producer's last step, where the defect was made, instead of
+    surfacing hours later as the consumer's failure."""
+    out: list[dict] = []
+    for h in body.get("handoffs", []):
+        if not h.get("preflight"):
+            continue
+        found = resolve(h["to"])
+        if found is None:
+            continue  # filing refuses it (`version`); nothing to preflight against
+        for g in found[1].get("entry_gates", []):
+            out.append({"handoff": h["id"], "to": {"asop_id": h["to"]["asop_id"], "version": found[0]},
+                        "entry_gate": g["id"], "gate": g["gate"],
+                        "inputs": {k: h["inputs"][k] for k in g["over"] if k in h["inputs"]}})
+    return out
+
+
+def _refuse_rework(rule: str, detail: str, **ctx) -> dict:
+    return {"action": "refuse", "code": f"{REWORK_REFUSED}:{rule}", "detail": detail, **ctx}
+
+
+def plan_rework(body: dict, *, outcome: Optional[str] = None, failed_step: Optional[int] = None,
+                rounds_used: Optional[Mapping] = None, outputs: Optional[Mapping] = None,
+                owner: Optional[Mapping] = None, resolve: Optional[Resolver] = None,
+                chain: str = "") -> Optional[dict]:
+    """What a declared rework edge does (§3.9, v3.6). None when no edge
+    matches the trigger: the run then goes where it would have gone under
+    v3.5 — a repair for a failed step, its hand-offs for a finished run.
+
+    `failed_step` triggers a step edge; `outcome` a procedure edge.
+    `rounds_used` maps an edge id to the rounds already spent IN THIS CHAIN
+    (for a procedure edge, against this owner). `owner` is the upstream run the
+    engine resolved by lineage: `{asop_id, subject, attempt, inputs}`.
+
+    - `{"action": "rework", ...}`: re-execute steps `from_step`..`through_step`
+      of this run, or re-file the owner as its next attempt with the SAME
+      inputs it had, and `prior_findings` (the scalar the `findings` output
+      holds) as run context outside its inputs. `consumes_attempt` and
+      `tier_bump` are carried as declared;
+    - `{"action": "escalate", "reason": "rounds_exhausted"}` once `max_rounds`
+      are spent — §5.4's person, never another round;
+    - `{"action": "refuse", "code": "rework_refused:<rule>"}`."""
+    edge = None
+    for e in body.get("rework", []):
+        if failed_step is not None and e.get("on_step_failure") == failed_step:
+            edge = e
+        elif failed_step is None and outcome is not None and outcome in e.get("on_outcomes", []):
+            edge = e
+        if edge:
+            break
+    if edge is None:
+        return None
+    used = (rounds_used or {}).get(edge["id"], 0)
+    if used >= edge["max_rounds"]:
+        return {"action": "escalate", "rework": edge["id"], "reason": "rounds_exhausted", "rounds": used}
+    base = {"action": "rework", "rework": edge["id"], "round": used + 1,
+            "consumes_attempt": edge["consumes_attempt"], "tier_bump": bool(edge.get("tier_bump"))}
+    if "step" in edge["to"]:
+        return {**base, "from_step": edge["to"]["step"], "through_step": edge["on_step_failure"]}
+    target = edge["to"]["asop_id"]
+    if not isinstance(owner, Mapping) or owner.get("asop_id") != target:
+        return _refuse_rework("owner", f"rework '{edge['id']}' re-files '{target}', and the engine named no "
+                                       f"upstream run of it in this chain", rework=edge["id"])
+    found = resolve(edge["to"]) if resolve else None
+    if found is None:
+        return _refuse_rework("version", f"rework '{edge['id']}': no version of '{target}' matches "
+                                         f"{edge['to'].get('version') or edge['to'].get('versions')}",
+                              rework=edge["id"])
+    decision = {**base, "to": {"asop_id": target, "version": found[0]}, "subject": str(owner["subject"]),
+                "inputs": dict(owner.get("inputs") or {}), "attempt": int(owner.get("attempt", 1)) + 1}
+    decision["natural_key"] = natural_key(chain, target, decision["subject"], decision["attempt"])
+    if "findings" in edge:
+        value = (outputs or {}).get(edge["findings"])
+        if value is None or not _is_scalar(value):
+            return _refuse_rework("findings", f"rework '{edge['id']}': output '{edge['findings']}' is "
+                                              f"{'missing' if value is None else 'not a scalar reference'}",
+                                  rework=edge["id"])
+        decision["prior_findings"] = value
+    return decision

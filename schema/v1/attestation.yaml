@@ -96,6 +96,15 @@ properties:
       reason:
         $ref: '#/$defs/nonBlankString'
 
+  cases_run:
+    type: integer
+    minimum: 0
+    description: >-
+      v3.6. How many cases the command actually executed. Required when the
+      gate declares `min_cases` (a cross-record rule enforced at submission);
+      an exit 0 with fewer is evidence the suite evaluated nothing, recorded
+      as such rather than refused, because failure must stay recordable.
+
   submitted_by:
     description: >-
       Who attests. Set by the transport from the AUTHENTICATED actor, never

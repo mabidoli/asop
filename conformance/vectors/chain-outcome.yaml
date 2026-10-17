@@ -1,0 +1,49 @@
+# Conformance vectors — is the CHAIN done? (§5.8, v3.6)
+#
+# `runs` are the chain's runs as [asop_id, version, subject, attempt, status].
+# `chain_gate` is the outcome of the chain-level gate a terminal procedure
+# requires, when there is one. `verdict` is done, open or failed;
+# `mixed_versions` names any procedure the chain ran at more than one version.
+
+artifact: chain-outcome
+x-done: &done
+  - [plan, 9, C1, 1, superseded]
+  - [plan, 9, C1, 2, done]
+  - [build, 10, T1, 1, failed]
+  - [build, 10, T1, 2, done]
+vectors:
+  - id: co-latest-attempts-done
+    asserts: [A159]
+    runs: *done
+    verdict: done
+    because: "a superseded attempt and a failed attempt re-run to done do not hold the chain open"
+
+  - id: co-chain-gate-must-pass
+    asserts: [A159]
+    runs: *done
+    chain_gate: cannot_evaluate
+    verdict: open
+    because: "every run finished, and the chain gate could not read the ledger: not done"
+
+  - id: co-chain-gate-failed
+    asserts: [A159]
+    runs: *done
+    chain_gate: failed
+    verdict: failed
+
+  - id: co-latest-failed
+    asserts: [A159]
+    runs: [[plan, 9, C1, 1, done], [build, 10, T1, 1, failed]]
+    verdict: failed
+
+  - id: co-mixed-versions-reported
+    asserts: [A159]
+    runs: [[build, 10, T1, 1, done], [build, 11, T2, 1, done]]
+    verdict: done
+    mixed_versions: [build]
+    because: "a chain without a manifest may run two versions of one procedure; the outcome row says so instead of averaging them"
+
+  - id: co-empty-is-open
+    asserts: [A159]
+    runs: []
+    verdict: open

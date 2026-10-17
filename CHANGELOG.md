@@ -4,6 +4,117 @@ Version history for the ASOP specification. The specification itself is
 [`ASOP.md`](ASOP.md); this file is where it has been, so the specification can be
 about what it is.
 
+## v3.6 / asop-spec 0.6.0 — unreleased
+
+### Chains: what a long run taught, as declarations (§3.3, §3.7–§3.10, §5.2–§5.8)
+
+**Additive, every part of it.** A v3.5 record is a valid v3.6 record and means the same
+thing; a v3.5 gate has the same outcomes; an engine that declares nothing new behaves as
+it did. Each new behaviour is opt-in by a declaration on the record or the gate, or by an
+engine choosing to pin chains. What an adopter at 0.5.0 must do: nothing. What to adopt
+first, and what was left out because it could not be additive, is in
+[`MIGRATION.md`](MIGRATION.md).
+
+The evidence is a real run of a sixteen-procedure chain: hours per work item, tens to
+hundreds of agent steps per run, and a defect registry of about a hundred classes with
+hundreds of sightings. Most of the costly defects were not in any step's prose — the
+revision target v3 points at — but between steps: in gates that could not evaluate, in
+loops and pins that lived in engine code, in defaults nobody saw, and in a chain whose
+outcome nobody recorded. The seven changes, each with what an implementation must now
+do differently **if it declares the feature**:
+
+1. **Chain pin and adoption (§3.10).** A chain may pin one **manifest** at its start:
+   every reachable procedure resolved once (one version each) plus the digests of the
+   components that give its gates meaning (a checker, a rules file). The chain resolves
+   from the pin for the rest of its life; a hand-off range no longer resolves at each
+   filing. A chain that cannot be pinned whole is refused at its start. Moving a running
+   chain is an **adoption**, recorded by a declared human with an impact report computed
+   from the two manifests. New: `asop.chain-manifest/1`, `asop.adoption/1`,
+   `adoption_required`. *Opt-in:* an engine without manifests resolves at filing as in
+   v3.5 and may not claim it pins chains; making the pin mandatory is a v4 candidate.
+2. **Declared, bounded rework (§3.9).** A `rework` edge sends work back — to an earlier
+   step when a later step's gate fails, or to the upstream procedure that owns a finding
+   when the run ends with a rework outcome — with `max_rounds` (1..3), an explicit
+   `consumes_attempt`, and optional `tier_bump`. A procedure edge re-files the owner as
+   its next attempt with its inputs, carrying the declared `findings` output as prior
+   findings. Exhausted rounds escalate. Rework edges must go upstream and are excluded
+   from the cycle check, as escalations are. New refusal: `rework_refused:<rule>`.
+3. **The hand-off gate and the third outcome (§3.3, §3.8).** `entry_gates` declare a
+   consumer's deterministic precondition over its declared inputs. A gate may declare
+   `cannot_evaluate_exit` and `min_cases`; `cannot_evaluate` never releases dependents
+   and is never charged to the executor. A refused entry gate re-files the producer (a
+   `failed` one charged to the producer, a `cannot_evaluate` to nobody); the consumer is
+   never charged. A hand-off may declare `preflight` so the producer runs the consumer's
+   lint. Conformance now refuses, as a pass, a gate that exits 0 having run zero cases.
+4. **Generated plans as typed data (§3.7).** `subject_from` gains `order_by` (each filed
+   run carries `depends_on` and starts only after them), `concurrency`, and
+   `approved_subset` (only subjects a person approved, in an approval bound to the
+   output's current digest). `human_approved` gains `binds_digest`. A stale approval
+   files nothing. New rules: `handoff_refused:order`, `handoff_refused:approval`; new
+   record `asop.approval/1`.
+5. **Non-blocking human gates (§3.3).** `on_timeout: proceed_on_default`, human gates
+   only, with a required `default: {option, consequence, audience}`. The default is
+   recorded as taken; a late answer that differs makes what was built on it stale.
+6. **Chain outcome and chain-level done (§5.8).** A terminal procedure may `require` a
+   `chain_gate` over the run ledger. `asop.chain-outcome/1` records wall time, spend,
+   human wait, failures and escalations by fault class, escalations by audience, member
+   versions and any procedure run at two versions; it is the chain's row in
+   `outcomes_by_version`.
+7. **Per-step journaling and resume (§5.4, §5.6).** `asop.step-journal/1` entries are
+   appended when a step starts and ends, never batched; `resume_point` resumes from the
+   journal alone; a crash re-file is not an attempt; only `work` faults (or unclassified
+   ones) count toward §5.4's budget.
+
+And three folded in:
+
+- **(a) Source readiness** is an entry gate over a source input (§3.8): evaluated
+  deterministically before the procedure starts, held for a person when not ready,
+  recorded with the source's digest, and invalidated when the source changes (§5.7).
+- **(b) Answers are inputs** (§5.7): a run built while a question was open records it
+  with digest `null`; writing the answer makes it stale and re-files it. The general rule
+  — stale when an artefact read has changed digest — is now stated once, for outputs,
+  sources, approvals and answers alike.
+- **(c) Re-filing an exhausted owner with the findings** is the procedure rework edge of
+  (2); there is no second mechanism.
+
+**Compatibility.** For records, gates and engines: additive. For readers: as in v3.5,
+the record schema is closed, so a 0.5.0 reader refuses a record or gate that uses a v3.6
+field. That is deliberate — dropping an entry gate or a rework bound it did not
+understand would run the procedure without it. Adopt 0.6.0 before accepting such
+records. A v3.6-normalised gate that uses no v3.6 field carries only nulls in the new
+keys, which a 0.5.0 reader drops before validating, so it round-trips.
+
+One existing test pinned the closed hand-off rule set; it now lists v3.6's two rules
+beside the nine it had. No other existing test, and no existing vector, changed.
+
+### Distribution
+
+- Reference implementation, all exported from `asop`:
+  - `asop.gates`: `GATE_OUTCOMES`, `gate_outcome`, `timeout_resolution`; `gate_satisfied`
+    honours `cannot_evaluate_exit` and `min_cases`;
+  - `asop.chain`: `plan_entry`, `preflight_checks`, `plan_rework`, `fanout_startable`,
+    `MAX_REWORK_ROUNDS`, `REWORK_RULES`; `plan_handoffs` takes `approvals` and
+    `output_digests`; `requires_satisfied` takes `approvals`, `digests` and `chain_gates`;
+  - `asop.manifest` (new): `pin_manifest`, `manifest_resolver`, `manifest_digest`,
+    `validate_manifest`, `is_pinned`, `adoption_impact`, `validate_adoption`;
+  - `asop.journal` (new): `validate_journal_entry`, `resume_point`, `charged_failures`,
+    `stale_runs`, `chain_outcome`, `FAULT_CLASSES`.
+
+  No existing signature changed; every new parameter is a keyword with a default that
+  reproduces v3.5.
+- Schema: `gate.yaml`, `attestation.yaml` and `asop.yaml` gain the optional fields above;
+  five new schemas: `chain-manifest.yaml`, `adoption.yaml`, `approval.yaml`,
+  `step-journal.yaml`, `chain-outcome.yaml`.
+- Conformance: 89 new vectors, 229 in all — seven new files (`entry`, `rework`,
+  `fanout`, `manifest`, `journal`, `staleness`, `chain-outcome`) and additions to
+  `gate`, `attestation`, `satisfaction`, `chain-record`, `handoff` and `requires`.
+  25 new assertions, A135–A159; 23 are cited by a vector, and A148 and A152 need a
+  resolver, so the Python tests cover them. The runner learns seven artifact kinds and
+  a `pinned` hand-off vector.
+- Checked by 16 deliberate mutants of the new rules: the vectors caught all 16; the
+  Python tests caught 15 until the one that slipped through (a running run holding a
+  concurrency slot) got a test, and now catch all 16.
+
 ## v3.5 / asop-spec 0.5.0 — 2026-10-10
 
 ### Hand-offs: an ASOP declares where a finished run may go next (§3.7)

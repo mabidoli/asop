@@ -111,9 +111,11 @@ properties:
       - pass
       - fail
       - escalate
+      - proceed_on_default   # v3.6: human gates only, with `default`
     description: >-
       What happens to the work when the park clock expires and nobody
-      verified: pass, fail, or escalate to `escalate_to`. There is
+      verified: pass, fail, escalate to `escalate_to`, or (v3.6, human gates
+      only) proceed on the declared `default`, recorded as taken. There is
       deliberately no default — a library-level guess here silently passes or
       silently fails somebody else's release. Silence past the deadline
       resolves by this field: decided by omission is an outcome; an ignored
@@ -135,6 +137,21 @@ properties:
       so the queue offers it to the executor: the one party a human gate
       exists to exclude.
     $ref: '#/$defs/nonBlankString'
+
+  default:
+    type: object
+    additionalProperties: false
+    required: [option, consequence, audience]
+    properties:
+      option: {$ref: '#/$defs/nonBlankString'}
+      consequence: {$ref: '#/$defs/nonBlankString'}
+      audience: {$ref: '#/$defs/nonBlankString'}
+    description: >-
+      v3.6. The answer a non-blocking human gate builds on when nobody answers
+      in time: the option taken, what it commits the work to, and who must be
+      told. Present exactly when `on_timeout` is `proceed_on_default`. The
+      engine records the default as taken and what was built on it; a late
+      answer that differs makes that work stale (§5.7).
 
   # ---- execution group (hints to the executing domain) ----------------------
 
@@ -163,6 +180,24 @@ properties:
       artefact.
     $ref: '#/$defs/nonBlankString'
 
+  cannot_evaluate_exit:
+    type: integer
+    minimum: 1
+    maximum: 255
+    description: >-
+      v3.6, deterministic gates only. The exit status the check uses to say
+      it could not evaluate the work (3 by convention): the outcome is
+      `cannot_evaluate`, which never releases dependents and is never charged
+      to the executor. A gate without it has the two outcomes it always had.
+
+  min_cases:
+    type: integer
+    minimum: 1
+    description: >-
+      v3.6, deterministic gates only. The fewest cases an exit 0 must have
+      run to count as a pass; the attestation then carries `cases_run`. Fewer
+      is `cannot_evaluate`: a suite that collected nothing evaluated nothing.
+
 allOf:
   # ---- core: `kind`, and exactly one of `check` / `checks` ------------------
   # oneOf does the whole job: both present -> both branches match -> refused;
@@ -182,6 +217,7 @@ allOf:
         - required: [on_timeout]
         - required: [escalate_to]
         - required: [verifier]
+        - required: [default]
     then:
       required: [max_park_seconds, on_timeout]
 
@@ -200,6 +236,31 @@ allOf:
     then:
       properties:
         on_timeout: {const: escalate}
+
+  # ---- v3.6: a default exists exactly when the gate proceeds on one, and only
+  # a person's question has one ---------------------------------------------
+  - if:
+      required: [on_timeout]
+      properties:
+        on_timeout: {const: proceed_on_default}
+    then:
+      required: [default]
+      properties:
+        kind: {const: human}
+  - if:
+      required: [default]
+    then:
+      properties:
+        on_timeout: {const: proceed_on_default}
+
+  # ---- v3.6: only a deterministic gate is judged by exit status and cases ----
+  - if:
+      anyOf:
+        - required: [cannot_evaluate_exit]
+        - required: [min_cases]
+    then:
+      properties:
+        kind: {const: deterministic}
 
   # ---- verifier follows kind ------------------------------------------------
   # A human gate names who answers it — see `verifier` above.

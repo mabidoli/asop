@@ -225,3 +225,20 @@ vectors:
     expect: accept
     because: Judgment requires a boolean outcome and a nonblank explanation about the
       attested check.
+
+  # ---- v3.6 (§3.3): the case count is evidence when the gate asks for it ---
+  - id: att-refuse-missing-cases-run
+    asserts: [A137]
+    gate: {kind: deterministic, check: "make test", min_cases: 1}
+    document: {check: "make test", exit_status: 0, environment: ci, at: "2026-10-16T09:00:00Z"}
+    expect: refuse
+    refusal: attestation_invalid
+    reaches: "cases_run"
+    because: "an exit status alone cannot tell a green suite from an empty one"
+
+  - id: att-accept-zero-cases-as-evidence
+    asserts: [A136, A137]
+    gate: {kind: deterministic, check: "make test", min_cases: 1}
+    document: {check: "make test", exit_status: 0, environment: ci, at: "2026-10-16T09:00:00Z", cases_run: 0}
+    expect: accept
+    because: "an empty run is recordable evidence; whether it answers the gate is satisfaction.yaml's question, and the answer is no"

@@ -598,8 +598,10 @@ def test_a_literal_dollar_is_escaped():
 
 def test_every_handoff_rule_is_a_catalogued_refusal():
     assert "handoff_refused:<rule>" in CODES
+    # the nine of v3.5, unchanged, plus v3.6's two (additive: a new rule refuses
+    # only what a v3.6 declaration asks for)
     assert set(HANDOFF_RULES) == {"malformed", "undeclared", "outcome", "cardinality", "subject",
-                                  "output", "inputs", "version", "conflict"}
+                                  "output", "inputs", "version", "conflict", "order", "approval"}
 
 
 def test_filing_request_shape():

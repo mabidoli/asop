@@ -114,5 +114,8 @@ CODES: dict[str, str] = {
     "role_unbound": "a run was filed with no binding for a role the ASOP declares",
     "constraint_unsatisfiable": "every binding offered for a run violates a `distinct` constraint — the same binding would fill both roles",
     # -- ASOP v3.5: hand-offs (ASOP.md §3.7, asop.chain) ---------------------
-    "handoff_refused:<rule>": "a finished run's hand-off or filing request was refused; the actual code carries the rule after the colon (asop.chain.HANDOFF_RULES): malformed, undeclared, outcome, cardinality, subject, output, inputs, version or conflict",
+    "handoff_refused:<rule>": "a finished run's hand-off or filing request was refused; the actual code carries the rule after the colon (asop.chain.HANDOFF_RULES): malformed, undeclared, outcome, cardinality, subject, output, inputs, version or conflict, and from v3.6 order or approval",
+    # -- ASOP v3.6: chains (ASOP.md §3.9, §3.10) ----------------------------
+    "rework_refused:<rule>": "a declared rework edge could not be applied; the actual code carries the rule after the colon (asop.chain.REWORK_RULES): undeclared, version, findings or owner",
+    "adoption_required": "a chain run would use a procedure version or component its chain manifest does not pin; moving a chain needs a recorded human adoption (asop.manifest)",
 }

@@ -189,3 +189,69 @@ vectors:
       verdict: *id006
     satisfied: false
     because: Both execution and judgment must pass; conflicting signals block completion.
+
+  # ---- v3.6 (§5.2): which outcome, not only whether it passed --------------
+  - id: sat-zero-cases-exit-zero-is-refused
+    asserts: [A136]
+    gate: {kind: deterministic, check: "make test", min_cases: 1}
+    attestations:
+      - {check: "make test", exit_status: 0, environment: ci, at: "2026-10-16T09:00:00Z", cases_run: 0}
+    satisfied: false
+    outcome: cannot_evaluate
+    because: >-
+      THE EMPTY SUITE. The suite collected nothing and exited 0. Read as a pass,
+      it merges work no test looked at; it is refused as a pass and reported as
+      could-not-evaluate, which is never charged to the executor.
+
+  - id: sat-enough-cases-passes
+    asserts: [A136]
+    gate: {kind: deterministic, check: "make test", min_cases: 1}
+    attestations:
+      - {check: "make test", exit_status: 0, environment: ci, at: "2026-10-16T09:00:00Z", cases_run: 41}
+    satisfied: true
+    outcome: passed
+
+  - id: sat-declared-exit-is-cannot-evaluate
+    asserts: [A135]
+    gate: {kind: deterministic, check: "make test", cannot_evaluate_exit: 3}
+    attestations:
+      - {check: "make test", exit_status: 3, environment: ci, at: "2026-10-16T09:00:00Z"}
+    satisfied: false
+    outcome: cannot_evaluate
+    because: "the check said it could not judge the work; that never releases dependents"
+
+  - id: sat-other-exit-still-fails
+    asserts: [A135]
+    gate: {kind: deterministic, check: "make test", cannot_evaluate_exit: 3}
+    attestations:
+      - {check: "make test", exit_status: 1, environment: ci, at: "2026-10-16T09:00:00Z"}
+    satisfied: false
+    outcome: failed
+
+  - id: sat-v35-gate-exit-three-is-a-failure
+    asserts: [A140]
+    gate: {kind: deterministic, check: "make test"}
+    attestations:
+      - {check: "make test", exit_status: 3, environment: ci, at: "2026-10-16T09:00:00Z", cases_run: 0}
+    satisfied: false
+    outcome: failed
+    because: "COMPATIBILITY. A gate that declares neither field has the outcomes it had in v3.5: exit 3 is a failure"
+
+  - id: sat-v35-gate-ignores-case-count
+    asserts: [A140]
+    gate: {kind: deterministic, check: "make test"}
+    attestations:
+      - {check: "make test", exit_status: 0, environment: ci, at: "2026-10-16T09:00:00Z", cases_run: 0}
+    satisfied: true
+    outcome: passed
+    because: "COMPATIBILITY. Without min_cases the count is informational; the zero-case refusal is opt-in"
+
+  - id: sat-ladder-first-rung-decides
+    asserts: [A135]
+    gate: {kind: deterministic, checks: ["make lint", "make test"], cannot_evaluate_exit: 3}
+    attestations:
+      - {check: "make lint", stage: 0, exit_status: 3, environment: ci, at: "2026-10-16T09:00:00Z"}
+      - {check: "make test", stage: 1, exit_status: 1, environment: ci, at: "2026-10-16T09:00:00Z"}
+    satisfied: false
+    outcome: cannot_evaluate
+    because: "the ladder stops at its first rung that did not pass; that rung could not evaluate"
