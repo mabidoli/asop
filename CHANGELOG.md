@@ -4,7 +4,7 @@ Version history for the ASOP specification. The specification itself is
 [`ASOP.md`](ASOP.md); this file is where it has been, so the specification can be
 about what it is.
 
-## v3.6 / asop-spec 0.6.0 — unreleased
+## v3.6 / asop-spec 0.6.0 — 2026-10-17
 
 ### Chains: what a long run taught, as declarations (§3.3, §3.7–§3.10, §5.2–§5.8)
 
