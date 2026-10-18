@@ -1653,3 +1653,48 @@ def plan_rework(body: dict, *, outcome: Optional[str] = None, failed_step: Optio
                                   rework=edge["id"])
         decision["prior_findings"] = value
     return decision
+
+
+# ---------------------------------------------------------------------------
+# v3.6.1: the approval record (§3.7)
+# ---------------------------------------------------------------------------
+
+APPROVAL_SCHEMA = "asop.approval/1"
+
+
+def validate_approval(doc: Any) -> dict:
+    """`asop.approval/1` (schema/v1/approval.yaml): `{schema, artefact, digest,
+    subset?, approved_by, approved_at}`. Exactly the schema's rules, so a store
+    that validated against the schema and one that calls this agree. Raises
+    `ChainContractError`; a store reports it as `approval_invalid`. Whether
+    `approved_by` is a declared human is the integrator's (§9), not this
+    validator's. `subset` absent approves every subject; present, it holds
+    unique subject ids (strings or integers), kept in the order given."""
+    if not isinstance(doc, Mapping):
+        raise ChainContractError("an approval must be a mapping.")
+    extra = set(doc) - {"schema", "artefact", "digest", "subset", "approved_by", "approved_at"}
+    if extra:
+        raise ChainContractError(f"approval: unknown field(s) {', '.join(sorted(map(str, extra)))}.")
+    if doc.get("schema") != APPROVAL_SCHEMA:
+        raise ChainContractError(f"an approval declares schema '{APPROVAL_SCHEMA}', got {doc.get('schema')!r}.")
+    digest = doc.get("digest")
+    if not isinstance(digest, str) or not digest.strip():
+        raise ChainContractError("approval 'digest' must be the non-empty digest of exactly what was approved.")
+    out = {"schema": APPROVAL_SCHEMA,
+           "artefact": _ident(doc.get("artefact"), "approval 'artefact'"),
+           "digest": digest,
+           "approved_by": _ident(doc.get("approved_by"), "approval 'approved_by'"),
+           "approved_at": _ident(doc.get("approved_at"), "approval 'approved_at'")}
+    if doc.get("subset") is not None:
+        subset = doc["subset"]
+        if isinstance(subset, (str, dict)) or not isinstance(subset, (list, tuple)):
+            raise ChainContractError("approval 'subset' must be a LIST of subject ids.")
+        for x in subset:
+            if isinstance(x, bool) or not isinstance(x, (str, int)):
+                raise ChainContractError(f"approval 'subset' holds {x!r}; a subject id is a string or an integer.")
+            if isinstance(x, str):
+                _ident(x, "approval 'subset' entry")
+        if len({(type(x), x) for x in subset}) != len(subset):
+            raise ChainContractError("approval 'subset' names a subject twice.")
+        out["subset"] = list(subset)
+    return out

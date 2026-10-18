@@ -27,7 +27,9 @@ from asop.revision import may_flip
 from asop.chain import (ChainContractError, fanout_startable, join_state, plan_entry, plan_handoffs,
                         plan_join, plan_rework, requires_satisfied, version_in)
 from asop.journal import chain_outcome, charged_failures, resume_point, stale_runs
-from asop.manifest import adoption_impact, body_digest, manifest_resolver, pin_manifest
+from asop.chain import validate_approval
+from asop.manifest import (adoption_impact, adoption_target, body_digest, check_pinned, manifest_resolver,
+                           pin_manifest, require_schema, validate_adoption, verify_manifest)
 from asop.sop import SopContractError, validate_asop
 
 VECTORS = pathlib.Path(__file__).resolve().parents[1] / "vectors"
@@ -192,7 +194,47 @@ def _digest(vector: dict, suite: dict) -> tuple[bool, str]:
     return (False, f"digest must differ from {got}") if got == vector["not_digest"] else (True, "differs")
 
 
-V36_QUESTIONS = {"digest": _digest, "entry": _entry, "rework": _rework, "fanout": _fanout, "manifest": _manifest,
+def _chain_store(vector: dict, suite: dict) -> tuple[bool, str]:
+    """v3.6.1: what a store refuses when it records chain records (§10)."""
+    store = suite.get("store") or {}
+    q = vector["question"]
+    try:
+        try:
+            if q == "manifest":
+                def fetch(a, ver):
+                    hit = (store.get(a) or {}).get(ver)
+                    return None if hit is None else (hit["status"], hit["record"])
+                verify_manifest(vector["document"], fetch)
+            elif q == "target":
+                adoption_target(vector["chain"], vector["to"], current=vector["current"], manifests=vector["manifests"])
+            elif q == "adoption":
+                try:
+                    validate_adoption(vector["document"], old=vector["old"], new=vector["new"])
+                except ChainContractError as e:
+                    raise Refusal("adoption_invalid", str(e), "correct the record") from e
+            elif q == "approval":
+                try:
+                    validate_approval(vector["document"])
+                except ChainContractError as e:
+                    raise Refusal("approval_invalid", str(e), "correct the record") from e
+            elif q == "pinned":
+                check_pinned(vector["manifest"], vector["asop_id"], vector.get("version"))
+            elif q == "schema":
+                require_schema(vector["document"])
+            else:
+                return False, f"unknown question {q!r}"
+        except Refusal:
+            raise
+    except Refusal as r:
+        if r.code not in REFUSAL_CODES:
+            return False, f"{r.code!r} is not in asop.refusals"
+        if vector["expect"] != "refuse":
+            return False, f"refused {r.code}: {r.message}"
+        return _compare(r.code, vector["refusal"], "refusal")
+    return _compare("accept", vector["expect"], "outcome")
+
+
+V36_QUESTIONS = {"digest": _digest, "chain-store": _chain_store, "entry": _entry, "rework": _rework, "fanout": _fanout, "manifest": _manifest,
                  "journal": _journal, "staleness": _staleness, "chain-outcome": _chain_outcome}
 
 

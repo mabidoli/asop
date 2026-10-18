@@ -1238,7 +1238,9 @@ to one.
 | `drifted(run_id)` | any | — | whether the pinned version is no longer active | — |
 | `handoff(run_id, requests?)` *(v3.5)* | the engine that owns the run | run complete | files what §3.7 decides; records each filing, duplicate and refusal with the run as parent | `handoff_refused:<rule>` |
 | `chain_start(asop_id, inputs)` *(v3.6)* | human or agent | as `run`; every reachable member pinnable | pins the chain manifest (§3.10), then files the first run as `run` does | as `run`, `sop_refused` |
-| `chain_adopt(chain, manifest)` *(v3.6)* | a declared human | the chain has a manifest | records an adoption with the computed impact; later filings resolve from the new manifest | `revision_policy:human_only`, `sop_refused` |
+| `manifest_record(manifest)` *(v3.6.1)* | the engine | every member held, runnable, at the store's digest | stores the manifest; the first one recorded for a chain is the one it starts under | `manifest_invalid`, `manifest_member_unknown`, `manifest_digest_mismatch`, `contract_unsupported` |
+| `chain_adopt(chain, manifest)` *(v3.6)* | a declared human | the chain has a manifest | records an adoption with the computed impact; later filings resolve from the new manifest | `revision_policy:human_only` (see §11.11), `chain_unknown`, `manifest_unknown`, `adoption_invalid`, `work_conflict`, `contract_unsupported` |
+| `approve(artefact, digest, subset?)` *(v3.6.1)* | a declared human | — | records an `asop.approval/1`; append-only | `approval_invalid`, `contract_unsupported`; a non-human caller: §11.11 |
 | `rework(run_id, trigger)` *(v3.6)* | the engine that owns the run | a declared edge matches | re-runs steps, re-files the owner, or escalates when the rounds are spent (§3.9) | `rework_refused:<rule>` |
 | `answer(question, answer)` *(v3.6)* | a declared human | the question exists | records the answer as an artefact; everything built on the open question is stale (§5.7) | `unauthenticated` |
 | `resume(run_id)` *(v3.6)* | the engine that owns the run | — | re-runs interrupted steps from the journal; not an attempt (§5.6) | `not_the_owner` |
@@ -1367,6 +1369,46 @@ stack trace. Codes relevant to ASOPs, from `asop.refusals`, plus the ones v3 add
 | **`handoff_refused:<rule>`** *(v3.5)* | a finished run's hand-off or filing request was refused; the rule is one of §3.7's nine, or *(v3.6)* `order` or `approval` |
 | **`rework_refused:<rule>`** *(v3.6)* | a declared rework edge could not be applied: `undeclared`, `version`, `findings` or `owner` (§3.9) |
 | **`adoption_required`** *(v3.6)* | a chain run would use a version or component its manifest does not pin; moving needs a recorded adoption (§3.10) |
+| **`manifest_invalid`** *(v3.6.1)* | the document is not a valid `asop.chain-manifest/1` |
+| **`manifest_member_unknown`** *(v3.6.1)* | a member pins a version the store does not hold as a **runnable** version: absent, or only a DRAFT (§5.1) |
+| **`manifest_digest_mismatch`** *(v3.6.1)* | a member's digest is not the one the store computes for that version (§3.10) |
+| **`manifest_unknown`** *(v3.6.1)* | an impact or adoption names a target manifest not recorded for **that** chain |
+| **`chain_unknown`** *(v3.6.1)* | no manifest has been recorded for the chain named |
+| **`adoption_invalid`** *(v3.6.1)* | the record is not a valid `asop.adoption/1` of exactly this move: digests or impact other than the computed ones |
+| **`approval_invalid`** *(v3.6.1)* | the document is not a valid `asop.approval/1` |
+| **`contract_unsupported`** *(v3.6.1)* | the receiver's installed contract does not implement the record kind or version the request needs |
+
+**Storing chain records** *(v3.6.1)*. The eight codes above are what a store returns
+when it is asked to record a chain manifest, an adoption or an approval, or to resolve
+one. They were first shipped by an implementation; the specification adopts them so
+that a second implementation refuses the same request with the same code.
+
+- **Effect.** Every one of them stores **nothing** and changes nothing. A refused
+  manifest is not partly recorded, and a refused adoption leaves the chain on the
+  manifest it was on.
+- **Order.** A store checks in this order, and reports the first failure:
+  `contract_unsupported`, then the record's own validity (`manifest_invalid`,
+  `adoption_invalid`, `approval_invalid`), then what it refers to (`chain_unknown`
+  before `manifest_unknown`; `manifest_member_unknown` before
+  `manifest_digest_mismatch`, member by member in manifest order).
+- **Retry.** Each is permanent for the same request. It succeeds only once the request,
+  or the store's state, changes: a member is activated, a manifest is recorded, or the
+  contract is upgraded. `work_conflict` is the one retryable refusal on these verbs,
+  meaning the chain moved while the adoption was being recorded.
+- **Remediation.** As everywhere in this contract, a refusal carries a `remediation`
+  sentence that names the next action, written at the call site for the payload in hand.
+  It is non-normative text.
+- **Transport.** HTTP statuses are an encoding (§8), so none is normative here. The
+  reference plane uses 400 for an invalid record, 404 for an unknown chain or target,
+  409 for a member or pin conflict, and 501 for `contract_unsupported`.
+- **One legacy use.** An implementation shipped `manifest_member_unknown` for an
+  unrecorded **target** manifest as well. That case is `manifest_unknown`. Readers
+  should accept both until the implementation migrates (`asop.refusals.LEGACY_USES`).
+- **Not here: `unknown_field`.** It is a refusal from a plane's HTTP surface: a key a
+  route does not take. It is not a record refusal; every record already refuses its own
+  unknown fields under its own code (`sop_refused`, `gate_invalid`,
+  `attestation_invalid`, and the codes above). So it is catalogued in `asop.refusals`
+  with the plane's other transport codes, and it is not part of this vocabulary.
 
 ---
 
@@ -1471,6 +1513,15 @@ stack trace. Codes relevant to ASOPs, from `asop.refusals`, plus the ones v3 add
     `cannot_evaluate` for every deterministic gate's exit 3 without a declaration;
     judged entry gates; normative `inputs[].kind` / `outputs[].kind`; declared
     per-step capabilities and environments; and run-instance identity across machines.
+
+11. **Which code refuses a non-human on a human-only chain verb?** **OPEN (v3.6.1).** §8.2
+    gives `chain_adopt` `revision_policy:human_only`, the code the human-only *revision*
+    verbs use. The first plane to implement adoption and approval refuses a non-human
+    caller with `capability_mismatch` instead, and §10 defines that code as "the caller's
+    binding is not eligible for the step's role". Neither reading is plainly right:
+    adoption is not a revision, and being a declared human is not a step's role. Until
+    this is decided, readers should accept either code for these two verbs, and nothing
+    here freezes one.
 
 ---
 

@@ -118,4 +118,37 @@ CODES: dict[str, str] = {
     # -- ASOP v3.6: chains (ASOP.md §3.9, §3.10) ----------------------------
     "rework_refused:<rule>": "a declared rework edge could not be applied; the actual code carries the rule after the colon (asop.chain.REWORK_RULES): undeclared, version, findings or owner",
     "adoption_required": "a chain run would use a procedure version or component its chain manifest does not pin; moving a chain needs a recorded human adoption (asop.manifest)",
+    # -- ASOP v3.6.1: storing chain records (ASOP.md §10, asop.manifest) ----
+    "manifest_invalid": "a chain manifest is not a valid asop.chain-manifest/1 document (asop.manifest.validate_manifest); nothing was stored",
+    "manifest_member_unknown": "a chain manifest pins a version the store does not hold as a runnable version: absent, or only a DRAFT (asop.manifest.verify_manifest)",
+    "manifest_digest_mismatch": "a chain manifest gives a member a digest other than the one the store computes for that version (§3.10's member digest)",
+    "manifest_unknown": "an impact or adoption names a target manifest the store has not recorded for that chain",
+    "chain_unknown": "no manifest has been recorded for the chain named, so it has nothing to resolve from or adopt away from",
+    "adoption_invalid": "an adoption is not a valid asop.adoption/1 record of exactly this move (asop.manifest.validate_adoption); nothing was stored",
+    "approval_invalid": "an approval is not a valid asop.approval/1 document (asop.chain.validate_approval); nothing was stored",
+    "contract_unsupported": "the receiving implementation's installed contract does not implement the record kind or version the request needs; it refuses rather than store what it cannot validate",
+    # -- the plane's HTTP surface, not the specification ----------------------
+    "unknown_field": "a request body on a strict route carried a key the route does not take; a transport-level refusal, distinct from a record's own unknown-field refusal (sop_refused, gate_invalid, ...)",
+}
+
+#: The v3.6.1 codes the SPECIFICATION defines for storing chain records
+#: (ASOP.md §10). The rest of `CODES` is catalogued because a caller may see
+#: it, not because every implementation must raise it.
+CHAIN_RECORD_CODES = (
+    "manifest_invalid",
+    "manifest_member_unknown",
+    "manifest_digest_mismatch",
+    "manifest_unknown",
+    "chain_unknown",
+    "adoption_invalid",
+    "approval_invalid",
+    "contract_unsupported",
+)
+
+#: Codes an implementation has raised with a meaning the specification later
+#: split or renamed: `(old code, situation) -> the code the spec defines`.
+#: Implementations may keep raising the old code for that situation until they
+#: migrate; readers should accept both.
+LEGACY_USES = {
+    ("manifest_member_unknown", "impact or adoption target manifest not recorded"): "manifest_unknown",
 }

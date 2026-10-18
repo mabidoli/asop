@@ -30,9 +30,52 @@ code point. The text now says which.
 One forward rule: a later version MUST NOT change the normalised body of a record that
 uses none of its new fields, or every pinned chain would be stranded.
 
+### Refusal codes for storing chain records, and the approval validator (§10, §3.7)
+
+The first plane to store manifests, adoptions and approvals shipped eight refusal codes
+the specification did not define. A second implementation would have had to guess them.
+They are now in §10, each reviewed before it was frozen:
+
+| code | when |
+|---|---|
+| `manifest_invalid` | the document is not a valid manifest |
+| `manifest_member_unknown` | a member is absent from the store, or is only a DRAFT |
+| `manifest_digest_mismatch` | a member's digest is not the store's (§3.10) |
+| `manifest_unknown` | **new name**: an impact or adoption target manifest is not recorded for that chain |
+| `chain_unknown` | no manifest has been recorded for the chain |
+| `adoption_invalid` | the record is not exactly the computed move |
+| `approval_invalid` | the document is not a valid approval |
+| `contract_unsupported` | the receiver's contract does not implement the record kind |
+
+The shared rules: every one of these stores nothing; the order of checks is normative;
+each is permanent for the same request; and HTTP statuses are not part of the code.
+
+- **One rename.** The plane raised `manifest_member_unknown` for an unrecorded *target*
+  manifest too. That is not a member, so the case is now `manifest_unknown`. The old use
+  is recorded in `asop.refusals.LEGACY_USES`, and readers accept both until the plane
+  migrates.
+- **`unknown_field` stays out of the vocabulary.** It is the plane's HTTP-surface
+  refusal for a route key. It is catalogued with the plane's other transport codes
+  (`bad_json` and the like) and is not part of §10, because every record already
+  refuses its own unknown fields under its own code.
+- **Left open (§11.11).** The plane refuses a non-human adoption or approval with
+  `capability_mismatch`. §8.2 (v3.6) says `revision_policy:human_only`. Neither is
+  frozen here.
+- `asop.chain.validate_approval` (new) validates `asop.approval/1` as the schema states
+  it. It mirrors the plane's own validator, which agrees on every vector.
+- Store-side checks that raise the codes, all new in `asop.manifest`:
+  - `verify_manifest(doc, fetch)`
+  - `adoption_target(chain, to, current=, manifests=)`
+  - `check_pinned(manifest, asop_id, version)`
+  - `require_schema(doc, supported)`
+- Conformance: `chain-store.yaml`, 22 vectors with a refusal case per code and accept
+  cases beside them. Assertions A164–A171.
+
 **Compatibility:** a clarification. No document changes validity, and no digest the
 reference implementation computed under 0.6.0 changes. An implementation that computed
-member digests another way must switch (see `MIGRATION.md`).
+member digests another way must switch (see `MIGRATION.md`). The refusal codes are
+additive: they name refusals the plane already made, and one of them, for one
+situation, under a new name.
 
 ### Distribution
 

@@ -20,6 +20,13 @@ serializer.
 Manifests already recorded with non-conforming digests do not become valid by
 upgrading. Re-pin those chains, or adopt them to a re-pinned manifest (§3.10).
 
+**Refusal codes (§10).** A store of chain records returns the eight codes of §10.
+There is one change to make: raise `manifest_unknown`, not `manifest_member_unknown`,
+when an impact or adoption names a target manifest that is not recorded for the chain.
+Until a store does, readers accept both. An implementation that validated
+`asop.approval/1` against the schema itself can call `asop.chain.validate_approval`
+instead; it applies the same rules. The check is `conformance/vectors/chain-store.yaml`.
+
 
 ## What an adopter at 0.5.0 must do
 

@@ -321,3 +321,97 @@ def validate_adoption(doc: Any, *, old: Mapping, new: Mapping) -> dict:
         out["reason"] = _ident(doc["reason"].strip() if isinstance(doc["reason"], str) else doc["reason"],
                                "adoption 'reason'")
     return out
+
+
+# ---------------------------------------------------------------------------
+# v3.6.1: storing chain records — the store-side checks, as refusals (§10)
+# ---------------------------------------------------------------------------
+
+def _refusal(code: str, message: str, remediation: str):
+    from asop.errors import Refusal
+    return Refusal(code=code, message=message, remediation=remediation)
+
+
+def verify_manifest(doc: Any, fetch: Callable[[str, int], Optional[tuple[str, Mapping]]]) -> dict:
+    """What a STORE checks before it records a manifest (§3.10): the document
+    is a manifest (`manifest_invalid`); every member is a version the store
+    holds and could run (`manifest_member_unknown` — absent, or only a DRAFT);
+    and every member's digest is the one the store computes
+    (`manifest_digest_mismatch`). `fetch(asop_id, version)` returns
+    `(status, record)` or None. Returns the validated manifest; raises `Refusal`.
+
+    Member order is the manifest's (sorted), so two stores refuse the same
+    manifest for the same member."""
+    try:
+        manifest = validate_manifest(doc)
+    except ChainContractError as e:
+        raise _refusal("manifest_invalid", str(e), "Correct the manifest and send it again; nothing was stored.") from e
+    for m in manifest["members"]:
+        found = fetch(m["asop_id"], m["version"])
+        if found is None:
+            raise _refusal("manifest_member_unknown", f"{m['asop_id']} v{m['version']} is not in this store",
+                           "Pin only versions this store holds; a manifest pinning nothing resolves nothing.")
+        status, record = found
+        if status == "draft":
+            raise _refusal("manifest_member_unknown",
+                           f"{m['asop_id']} v{m['version']} is a DRAFT, which cannot be run",
+                           "Activate it first, or pin the active version.")
+        try:
+            ours = body_digest(record, asop_id=m["asop_id"])
+        except Exception:  # a record the contract no longer accepts has no digest
+            ours = None
+        if m["digest"] != ours:
+            raise _refusal("manifest_digest_mismatch",
+                           f"{m['asop_id']} v{m['version']}: the manifest says {m['digest']}, "
+                           f"this store's digest is {ours}",
+                           "A member's digest is the store's (ASOP.md §3.10): take it from the store, "
+                           "or compute it with body_digest, never by another rule.")
+    return manifest
+
+
+def adoption_target(chain: str, to: str, *, current: Mapping[str, str],
+                    manifests: Mapping[str, Mapping]) -> tuple[dict, dict]:
+    """The `(old, new)` manifests an impact or an adoption of `to` for `chain`
+    moves between, from what the store has recorded: `current` maps a chain to
+    the digest it runs under, `manifests` a digest to its manifest. Refuses
+    `chain_unknown` when the chain has no manifest, and `manifest_unknown`
+    when `to` is not recorded for THIS chain."""
+    if chain not in current:
+        raise _refusal("chain_unknown", f"no manifest has been recorded for chain {chain!r}",
+                       "Record the chain's manifest first.")
+    new = manifests.get(to)
+    if new is None or new.get("chain") != chain:
+        raise _refusal("manifest_unknown", f"no manifest {to} is recorded for chain {chain!r}",
+                       "Record the target manifest for this chain first, then ask again.")
+    return validate_manifest(manifests[current[chain]]), validate_manifest(new)
+
+
+def check_pinned(manifest: Mapping, asop_id: str, version: Optional[int] = None) -> int:
+    """The version a run of `asop_id` files at in this chain; `adoption_required`
+    when the manifest pins no version of it, or `version` is not the pinned one."""
+    m = validate_manifest(manifest)
+    pinned = next((x["version"] for x in m["members"] if x["asop_id"] == asop_id), None)
+    if pinned is None or (version is not None and version != pinned):
+        raise _refusal(ADOPTION_REQUIRED,
+                       f"the chain pins {asop_id + ' v' + str(pinned) if pinned else 'no version of ' + asop_id}; "
+                       f"the run asked for {'v' + str(version) if version is not None else 'any version'}",
+                       "File at the pinned version, or have a person adopt a manifest that pins the one you need.")
+    return pinned
+
+
+#: The record schemas this package implements; anything else is `contract_unsupported`.
+SUPPORTED_SCHEMAS = ("asop.filing-request/1", "asop.chain-manifest/1", "asop.adoption/1", "asop.approval/1",
+                     "asop.step-journal/1", "asop.chain-outcome/1")
+
+
+def require_schema(doc: Any, supported: Iterable[str] = SUPPORTED_SCHEMAS) -> str:
+    """Refuse `contract_unsupported` when a record names a schema the receiving
+    implementation does not implement. A record kind it cannot validate is
+    refused, never stored unvalidated. A document with no `schema` is not a
+    question of support; its own validator refuses it."""
+    name = doc.get("schema") if isinstance(doc, Mapping) else None
+    if isinstance(name, str) and name not in tuple(supported):
+        raise _refusal("contract_unsupported", f"this implementation does not implement {name!r}",
+                       "Upgrade the receiver's contract to a release that implements it; storing the "
+                       "record unvalidated would be worse than refusing it.")
+    return name
