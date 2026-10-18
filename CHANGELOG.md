@@ -71,6 +71,54 @@ each is permanent for the same request; and HTTP statuses are not part of the co
 - Conformance: `chain-store.yaml`, 22 vectors with a refusal case per code and accept
   cases beside them. Assertions A164–A171.
 
+### Run ownership: a recorded administrative transfer (§7.2)
+
+§7.2 fixed a run's owner at filing, with no verb able to move it. If a store went away
+(machine retired, operator gone, credential revoked), every run it owned was stranded.
+v3.6.1 keeps the rule for **run** verbs and adds one exception: a **recorded
+administrative transfer** (`asop.ownership-transfer/1`).
+
+- **Who.** A declared administrator who is also a declared human (`ASOP_ADMINISTRATORS`,
+  a new registry), with a required reason.
+- **What it moves.** From the run's current owner, at its epoch + 1.
+- **What it records.** The transfer is appended to the run's `ownership_history`, and
+  the run's ownership `epoch` increases.
+- **Fencing.** After the transfer, the former owner's in-flight completions and
+  attestations are refused `not_the_owner`, and the refusal states the current epoch.
+- **No dependence on the old owner.** It needs no signature from the former owner, and
+  no reachability.
+- **No rewriting.** Completed steps and their evidence are untouched.
+- **Refusals.** `transfer_refused:<rule>`, where the rule is `malformed`,
+  `administrator`, `reason`, `stale` or `same_owner`.
+
+**Reference.**
+- `asop.ownership` (new): `validate_transfer`, `apply_transfer`, `check_flip`,
+  `ownership_of` and `administrators_from_env`.
+- `asop.revision.may_flip` gains optional `actor_epoch` and `run_epoch`. Left out, they
+  are 0, which is the v3.6 answer.
+
+**Schemas.**
+- `ownership-transfer.yaml` (new).
+- `run-ownership.yaml` (new). The contract has no whole-run schema, so this one names a
+  run's ownership fields: `owner`, plus optional `epoch` and `ownership_history`.
+
+**Conformance.**
+- `transfer.yaml`: 9 vectors.
+- Three new `ownership.yaml` vectors for the fenced former owner.
+- Assertions A172–A174.
+
+**What changed in existing text.** Two sentences said ownership "never moves": §7.2 and
+the §11.8 qualification. Both now read "no run verb moves it", with the transfer named
+as the exception, and the `may_flip` docstring says the same. No existing assertion
+said ownership never changes: the six v3.4 ownership vectors cite none, and A078–A080
+(§7) are about planes and harnesses. So no assertion changed. Existing vectors and
+tests are byte-identical to v0.6.0, and the v0.6.0 suite run against this branch gives
+353/353 tests and 229/229 vectors.
+
+Ownership is run state, never ASOP-record state. It cannot enter a member digest: the
+record schema has no such field, and a record carrying one is refused (a test pins
+this).
+
 **Compatibility:** a clarification. No document changes validity, and no digest the
 reference implementation computed under 0.6.0 changes. An implementation that computed
 member digests another way must switch (see `MIGRATION.md`). The refusal codes are

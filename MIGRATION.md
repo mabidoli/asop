@@ -20,6 +20,18 @@ serializer.
 Manifests already recorded with non-conforming digests do not become valid by
 upgrading. Re-pin those chains, or adopt them to a re-pinned manifest (§3.10).
 
+**Run ownership (§7.2).** Nothing breaks. A run with no `epoch` is at epoch 0, and a
+store that sends no epoch is treated as claiming 0, so v3.6 stores behave exactly as
+before. The one thing that changes for an existing store: once an administrator
+transfers one of its runs, its completions for that run are refused `not_the_owner`.
+To adopt the transfer:
+- declare `ASOP_ADMINISTRATORS` (empty transfers nothing);
+- store `epoch` and `ownership_history` on runs;
+- send the epoch with every flip, completion and attestation;
+- check flips with `asop.ownership.check_flip`.
+
+The checks are `transfer.yaml` and the epoch vectors in `ownership.yaml`.
+
 **Refusal codes (§10).** A store of chain records returns the eight codes of §10.
 There is one change to make: raise `manifest_unknown`, not `manifest_member_unknown`,
 when an impact or adoption names a target manifest that is not recorded for the chain.

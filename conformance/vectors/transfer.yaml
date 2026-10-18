@@ -1,0 +1,94 @@
+# Conformance vectors — may ownership of a run be TRANSFERRED? (§7.2, v3.6.1)
+#
+# No run verb moves ownership. A recorded administrative transfer may: by a
+# declared administrator who is a declared human, with a reason, from the
+# run's current owner at its epoch + 1. It needs nothing from the former owner,
+# and rewrites nothing already done. `run` is the run's ownership state
+# (`run_id`, `owner`, `epoch`, `ownership_history`; epoch and history absent on
+# a run never transferred). `document` is the transfer, whose `by` is the
+# authenticated actor. An accepted vector gives the new `owner`, `epoch` and the
+# length of the `history`.
+
+artifact: transfer
+administrators: [ines]
+humans: [ines, dana]
+x-run: &run {run_id: R1, owner: store-a}
+x-t: &t {schema: asop.ownership-transfer/1, run: R1, from: store-a, to: store-b, epoch: 1, by: ines,
+          at: "2026-10-18T12:00:00Z", reason: "store-a was decommissioned; its operator has left"}
+vectors:
+  - id: tr-administrator-transfers
+    asserts: [A172]
+    run: *run
+    document: *t
+    expect: accept
+    owner: store-b
+    epoch: 1
+    history: 1
+    because: "a declared human administrator, with a reason, from the current owner at epoch 0 + 1"
+
+  - id: tr-owner-unreachable-or-revoked-does-not-block
+    asserts: [A172]
+    run: {run_id: R1, owner: store-gone}
+    document: {schema: asop.ownership-transfer/1, run: R1, from: store-gone, to: store-b, epoch: 1, by: ines,
+               at: "2026-10-18T12:00:00Z", reason: "store-gone's credential was revoked"}
+    expect: accept
+    owner: store-b
+    epoch: 1
+    history: 1
+    because: "the former owner is in no registry and signs nothing: a transfer needs nothing from it"
+
+  - id: tr-second-transfer-appends
+    asserts: [A172]
+    run: {run_id: R1, owner: store-b, epoch: 1, ownership_history: [*t]}
+    document: {schema: asop.ownership-transfer/1, run: R1, from: store-b, to: store-c, epoch: 2, by: ines,
+               at: "2026-10-19T12:00:00Z", reason: "store-b is being retired too"}
+    expect: accept
+    owner: store-c
+    epoch: 2
+    history: 2
+
+  - id: tr-refuse-non-administrator
+    asserts: [A172]
+    run: *run
+    document: {<<: *t, by: dana}
+    expect: refuse
+    refusal: transfer_refused:administrator
+    because: "a declared human who is not an administrator may not move a run"
+
+  - id: tr-refuse-agent-administrator
+    asserts: [A172]
+    run: *run
+    document: {<<: *t, by: ops-bot}
+    expect: refuse
+    refusal: transfer_refused:administrator
+    because: "the transfer is human-only; an agent is never an administrator for this"
+
+  - id: tr-refuse-no-reason
+    asserts: [A172]
+    run: *run
+    document: {<<: *t, reason: "  "}
+    expect: refuse
+    refusal: transfer_refused:reason
+    because: "the record outlives everybody who remembers why"
+
+  - id: tr-refuse-wrong-from
+    asserts: [A172]
+    run: {run_id: R1, owner: store-b, epoch: 1}
+    document: *t
+    expect: refuse
+    refusal: transfer_refused:stale
+    because: "two administrators racing: the second transfer names an owner and epoch the run no longer has"
+
+  - id: tr-refuse-same-owner
+    asserts: [A172]
+    run: *run
+    document: {<<: *t, to: store-a}
+    expect: refuse
+    refusal: transfer_refused:same_owner
+
+  - id: tr-refuse-malformed
+    asserts: [A172]
+    run: *run
+    document: {<<: *t, epoch: 0}
+    expect: refuse
+    refusal: transfer_refused:malformed

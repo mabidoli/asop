@@ -1,0 +1,38 @@
+# =============================================================================
+# Ownership transfer — the one way a run changes owner (ASOP.md §7.2, v3.6.1).
+#
+# JSON Schema draft 2020-12, authored in YAML. Recorded by a declared
+# administrator who is a declared human; appended to the run's
+# `ownership_history`. Cross-record rules, enforced where the transfer is
+# recorded: `by` is the authenticated actor and is in ASOP_ADMINISTRATORS and
+# ASOP_HUMANS; `from` is the run's current owner; `epoch` is its current
+# epoch + 1; `to` differs from `from`. Nothing here is signed by, or needs, the
+# former owner.
+# =============================================================================
+
+$id: https://raw.githubusercontent.com/mabidoli/asop/main/schema/v1/ownership-transfer.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Ownership transfer
+type: object
+additionalProperties: false
+required: [schema, run, from, to, epoch, by, at, reason]
+properties:
+  schema: {const: asop.ownership-transfer/1}
+  run: {$ref: '#/$defs/exactName'}
+  from: {$ref: '#/$defs/exactName'}
+  to: {$ref: '#/$defs/exactName'}
+  epoch:
+    type: integer
+    minimum: 1
+    description: The run's ownership epoch after this transfer.
+  by:
+    $ref: '#/$defs/exactName'
+    description: The administrator, set from the authenticated actor, never from the body.
+  at: {type: string, format: date-time}
+  reason:
+    type: string
+    pattern: '\S'
+$defs:
+  exactName:
+    type: string
+    pattern: '^\S([\s\S]*\S)?$'

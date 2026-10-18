@@ -234,7 +234,25 @@ def _chain_store(vector: dict, suite: dict) -> tuple[bool, str]:
     return _compare("accept", vector["expect"], "outcome")
 
 
-V36_QUESTIONS = {"digest": _digest, "chain-store": _chain_store, "entry": _entry, "rework": _rework, "fanout": _fanout, "manifest": _manifest,
+def _transfer(vector: dict, suite: dict) -> tuple[bool, str]:
+    """v3.6.1: may an administrator move this run's ownership? (§7.2)"""
+    from asop.ownership import apply_transfer
+    try:
+        after = apply_transfer(vector["run"], vector["document"], administrators=suite.get("administrators") or [],
+                               humans=suite.get("humans") or [])
+    except Refusal as r:
+        if r.code.split(":", 1)[0] + ":<rule>" not in REFUSAL_CODES:
+            return False, f"{r.code!r} is not in asop.refusals"
+        if vector["expect"] != "refuse":
+            return False, f"refused {r.code}: {r.message}"
+        return _compare(r.code, vector["refusal"], "refusal")
+    if vector["expect"] != "accept":
+        return False, f"accepted; expected {vector.get('refusal')}"
+    return _compare([after["owner"], after["epoch"], len(after["ownership_history"])],
+                    [vector["owner"], vector["epoch"], vector["history"]], "ownership")
+
+
+V36_QUESTIONS = {"digest": _digest, "transfer": _transfer, "chain-store": _chain_store, "entry": _entry, "rework": _rework, "fanout": _fanout, "manifest": _manifest,
                  "journal": _journal, "staleness": _staleness, "chain-outcome": _chain_outcome}
 
 
@@ -307,7 +325,8 @@ def run_one(artifact: str, vector: dict, suite: dict | None = None) -> tuple[boo
         elif artifact == "ownership":
             # Not a document question either: given a run's owner and a store
             # asking to flip one of its beads, may it? §7.2.
-            got = may_flip(vector["actor_store"], vector["run_owner"])
+            got = may_flip(vector["actor_store"], vector["run_owner"],
+                           actor_epoch=vector.get("actor_epoch"), run_epoch=vector.get("run_epoch"))
             want = vector["may_flip"]
             if got != want:
                 return False, f"expected may_flip={want}, got {got}"

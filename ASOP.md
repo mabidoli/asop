@@ -1136,10 +1136,48 @@ exist in two places, which is the failure §11.8 refused.
 
 ### 7.2 One run, one owner
 
-Ownership is recorded on the run when it is filed and no verb moves it. The store that
-owns a run is the only one that may flip the status of its beads; any other store
+Ownership is recorded on the run when it is filed and no **run** verb moves it. The store
+that owns a run is the only one that may flip the status of its beads; any other store
 attempting it is refused **`not_the_owner`** (§10) — a distinct code from
 `not_the_holder`, which is about a lease, not about authority.
+
+**Administrative transfer** *(v3.6.1)*. The one exception. A store goes away — its
+machine is retired, its operator leaves, its credential is revoked — and without an
+exception every run it owned would be stranded, because the only party allowed to
+complete them can no longer speak. A **recorded administrative transfer**
+(`asop.ownership-transfer/1`, [schema](schema/v1/ownership-transfer.yaml)) may move a
+run to another store:
+
+- **Human-only, by a declared administrator.** The actor — authenticated by the
+  transport, never named in the body (§9) — must be in `ASOP_ADMINISTRATORS` **and**
+  `ASOP_HUMANS`. An empty administrator registry transfers nothing, which is v3.6's
+  behaviour.
+- **With a reason**, required and non-blank.
+- **The next transfer of this run, exactly.** `from` is the run's current owner and
+  `epoch` is its current ownership epoch + 1. A transfer naming anything else is
+  refused (`stale`), so two administrators racing cannot both win.
+- **Recorded.** The transfer is appended to the run's `ownership_history` (who, when,
+  from, to, reason), and the run's `owner` and `epoch` become the transfer's
+  ([schema](schema/v1/run-ownership.yaml)). A run never transferred is at epoch 0 with
+  no history; both fields are optional, so every v3.6 run is a valid v3.6.1 run.
+- **The former owner is fenced.** Every flip, completion and attestation carries the
+  epoch its store believes it holds. After a transfer, anything the former owner sends
+  is refused `not_the_owner`, and the refusal states the run's current epoch. That
+  holds even while the former owner's executors still have live leases, and even if the
+  run is later transferred back: a stale epoch is refused whoever sends it. A store that
+  predates epochs claims epoch 0, which is accepted only until the run's first transfer.
+- **Needs nothing from the former owner**: no signature, no reachability, no valid
+  credential. A transfer that the store being replaced could block would not solve the
+  problem it exists for.
+- **Rewrites nothing done.** Completed steps keep their status, their attestations and
+  their evidence, and outcomes already counted stay counted. Only who may flip the
+  **remaining** beads changes; the new owner re-claims them under new leases.
+- Refusals are `transfer_refused:<rule>`: `malformed`, `administrator`, `reason`,
+  `stale` or `same_owner`.
+
+Ownership lives on the run, never on the ASOP record. It is not part of a chain
+member's digest (§3.10): the record schema has no ownership field, and a record that
+carries one is refused rather than digested.
 
 A **journal** is what a non-owning plane receives: it may read, count, run the lessons
 pass and route human gates, and it may not complete a step. To be useful to the lessons
@@ -1244,6 +1282,7 @@ to one.
 | `rework(run_id, trigger)` *(v3.6)* | the engine that owns the run | a declared edge matches | re-runs steps, re-files the owner, or escalates when the rounds are spent (§3.9) | `rework_refused:<rule>` |
 | `answer(question, answer)` *(v3.6)* | a declared human | the question exists | records the answer as an artefact; everything built on the open question is stale (§5.7) | `unauthenticated` |
 | `resume(run_id)` *(v3.6)* | the engine that owns the run | — | re-runs interrupted steps from the journal; not an attempt (§5.6) | `not_the_owner` |
+| `run_transfer(run_id, to, reason)` *(v3.6.1)* | a declared administrator who is human | — | moves ownership, appends to `ownership_history`, bumps the epoch; completed steps untouched (§7.2) | `transfer_refused:<rule>` |
 
 ### 8.3 Executing
 
@@ -1290,6 +1329,7 @@ three answers. The declarations are, alongside the two §6.4 already names:
 | protected tags | `ASOP_PROTECTED_TAGS` | tags that freeze a step against agents (§6.4) |
 | **verifiers** | **`ASOP_VERIFIERS`** | routes that may answer a `judged` or `human` gate (§5.3) |
 | **adjudicators** | **`ASOP_ADJUDICATORS`** | routes that may adjudicate a divergence (§6.1) |
+| **administrators** *(v3.6.1)* | **`ASOP_ADMINISTRATORS`** | people who may transfer a run's ownership (§7.2); each must also be a declared human |
 
 Comma-separated actor names, matched on exact spelling — the same format and the same
 rule as `ASOP_HUMANS`, so an operator declaring who may verify does not have to learn a
@@ -1359,7 +1399,8 @@ stack trace. Codes relevant to ASOPs, from `asop.refusals`, plus the ones v3 add
 | `work_conflict` / `not_the_holder` / `attempt_required` | fenced-lease rules |
 | `capability_mismatch` | the caller's binding is not eligible for the step's role |
 | `attestation_required` / `attestation_invalid` | §5.3 — invalid also covers a `judged`/`human` attestation with no `verdict`, or one not tied to the gate's `check` |
-| **`not_the_owner`** *(v3.4)* | a store tried to flip a bead of a run another store owns (§7.2). Distinct from `not_the_holder`, which is about a lease rather than about authority |
+| **`not_the_owner`** *(v3.4)* | a store tried to flip a bead of a run another store owns (§7.2), or *(v3.6.1)* owned at an earlier ownership epoch; the refusal states the current epoch. Distinct from `not_the_holder`, which is about a lease rather than about authority |
+| **`transfer_refused:<rule>`** *(v3.6.1)* | an administrative ownership transfer was refused: `malformed`, `administrator`, `reason`, `stale` or `same_owner` (§7.2) |
 | **`unauthenticated`** *(v3.2)* | a claimed adjudicator, verifier, or judge identity does not resolve against the operator's declared registry (§5.3, §6.1, §9) |
 | `not_terminal` | a verdict on a bead that is not parked |
 | `metadata_reserved` / `natural_key_reserved` | a caller wrote a plane-owned key |
@@ -1479,7 +1520,8 @@ that a second implementation refuses the same request with the same code.
    standalone, or connected-and-the-plane-owns-everything — and its objection to the
    alternative was precise: accepting outcomes for runs it did not file "leaves two
    queues to agree about one run". §7 now answers that objection rather than reopening
-   it. Ownership is fixed at filing and never moves, so two queues never hold one run;
+   it. Ownership is fixed at filing and no run verb moves it — since v3.6.1, only a recorded
+   administrative transfer (§7.2) — so two queues never hold one run;
    a locally-filed run is owned locally and journalled upward, and the plane may not
    complete a step of a run it does not own. What changes is only that "connected" no
    longer implies "everything was filed there".
@@ -1571,6 +1613,7 @@ that a second implementation refuses the same request with the same code.
 | **adoption** | a person's recorded move of a chain to another manifest, with a computed impact report (§3.10) |
 | **chain outcome** | the chain-level record computed from the ledger, and the chain's row in `outcomes_by_version` (§5.8) |
 | **fault class** | why something failed: `work`, `environment`, `checker`, `handoff`, `decision`. Only `work` is charged (§5.4) |
+| **ownership epoch** | a counter on a run, bumped by each administrative transfer; a flip at an older epoch is `not_the_owner` (§7.2) |
 | **plane** | a coordination layer storing ASOPs and outcomes across harnesses |
 | **harness** | a runtime that executes beads; runs alone or reports to a plane |
 

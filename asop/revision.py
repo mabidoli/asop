@@ -206,10 +206,15 @@ def may_adjudicate(
     return resolves(actor, adjudicators) or resolves(actor, humans)
 
 
-def may_flip(actor_store: Optional[str], run_owner: Optional[str]) -> bool:
+def may_flip(actor_store: Optional[str], run_owner: Optional[str], *,
+             actor_epoch: Optional[int] = None, run_epoch: Optional[int] = None) -> bool:
     """Whether this store may flip the status of a bead in that run (§7.2).
 
-    Ownership is fixed when the run is filed and no verb moves it. Only the
+    Ownership is fixed when the run is filed and no RUN verb moves it; only a
+    recorded administrative transfer does (v3.6.1, `asop.ownership`), and it
+    bumps the run's ownership epoch. An epoch left out is 0 — the epoch of a
+    run never transferred — so a caller that predates epochs gets the v3.6
+    answer until a transfer happens, and a refusal after. Only the
     owning store completes, fails or parks a bead; every other store is
     refused `not_the_owner` — a different question from `not_the_holder`,
     which asks whether a lease is current. A store can hold a valid lease on
@@ -218,7 +223,8 @@ def may_flip(actor_store: Optional[str], run_owner: Optional[str]) -> bool:
 
     `None` on either side never matches. An unowned run is not everyone's.
     """
-    return actor_store is not None and run_owner is not None and actor_store == run_owner
+    return (actor_store is not None and run_owner is not None and actor_store == run_owner
+            and (actor_epoch or 0) == (run_epoch or 0))
 
 
 def kind_of(actor: Optional[str], humans: Iterable[str]) -> str:

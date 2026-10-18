@@ -1,0 +1,31 @@
+# =============================================================================
+# Run ownership — the ownership fields of a filed run (ASOP.md §7.2).
+#
+# JSON Schema draft 2020-12, authored in YAML. This contract has no schema for
+# a whole run (a run is the store's record); this one names the fields of it
+# that ownership needs, so two stores agree on them. `owner` is v3.4's; `epoch`
+# and `ownership_history` are v3.6.1's and OPTIONAL — absent, a run is at epoch
+# 0 and has never been transferred, which every v3.6 run is. Open
+# (`additionalProperties: true`): a store's run record carries much else.
+# =============================================================================
+
+$id: https://raw.githubusercontent.com/mabidoli/asop/main/schema/v1/run-ownership.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Run ownership
+type: object
+additionalProperties: true
+required: [owner]
+properties:
+  owner:
+    type: string
+    pattern: '^\S([\s\S]*\S)?$'
+    description: The store that owns the run — the only one that may flip its beads.
+  epoch:
+    type: integer
+    minimum: 0
+    default: 0
+    description: Bumped by each administrative transfer; a flip at an older epoch is not_the_owner.
+  ownership_history:
+    type: array
+    items: {$ref: 'ownership-transfer.yaml'}
+    description: Every transfer, oldest first. Its length equals `epoch`.

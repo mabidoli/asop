@@ -82,6 +82,16 @@ from asop.manifest import (
     validate_adoption,
     validate_manifest,
 )
+from asop.ownership import (
+    ADMINISTRATORS_ENV_VAR,
+    TRANSFER_RULES,
+    TRANSFER_SCHEMA,
+    administrators_from_env,
+    apply_transfer,
+    check_flip,
+    ownership_of,
+    validate_transfer,
+)
 from asop.sop import (
     ASOP,
     ASOP_VERSION,
@@ -177,6 +187,15 @@ __all__ = [
     "pin_manifest",
     "validate_adoption",
     "validate_manifest",
+    # v3.6.1 — administrative ownership transfer (§7.2)
+    "ADMINISTRATORS_ENV_VAR",
+    "TRANSFER_RULES",
+    "TRANSFER_SCHEMA",
+    "administrators_from_env",
+    "apply_transfer",
+    "check_flip",
+    "ownership_of",
+    "validate_transfer",
     # v3.6 — journal, resume, staleness, chain outcome (§5.6–§5.8)
     "FAULT_CLASSES",
     "charged_failures",

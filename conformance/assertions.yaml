@@ -1084,3 +1084,21 @@
   applies_to: manifest
   testable: true
   violation: "An older plane stores a record it cannot validate."
+- id: A172
+  section: "7.2"
+  rule: "A run's ownership moves only by a recorded administrative transfer: by a declared administrator who is a declared human, with a non-blank reason, from the current owner at epoch + 1 to a different store; it needs nothing from the former owner; anything else is transfer_refused:<rule>."
+  applies_to: run
+  testable: true
+  violation: "An agent, a non-administrator or a reasonless request moves a run, or a transfer waits on the owner it replaces."
+- id: A173
+  section: "7.2"
+  rule: "After a transfer, a flip by any store at an earlier ownership epoch, including the former owner, is refused not_the_owner; a caller that states no epoch is at epoch 0."
+  applies_to: run
+  testable: true
+  violation: "The former owner's in-flight completion lands after the run was transferred."
+- id: A174
+  section: "7.2"
+  rule: "A transfer changes only the run's owner, epoch and ownership history; completed steps, their evidence and counted outcomes are unchanged."
+  applies_to: run
+  testable: true
+  violation: "A transfer re-opens or re-attests a completed step."

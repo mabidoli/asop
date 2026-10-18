@@ -51,3 +51,34 @@ vectors:
     run_owner: store-a
     may_flip: false
     because: "a store that cannot say who it is cannot be the owner"
+
+  # ---- v3.6.1: after an administrative transfer (§7.2) ----------------------
+  # `run_epoch` is the run's ownership epoch and `actor_epoch` the epoch the
+  # store claims; left out, each is 0, so every vector above is unchanged.
+  - id: own-former-owner-refused-after-transfer
+    asserts: [A173]
+    actor_store: store-a
+    run_owner: store-b
+    run_epoch: 1
+    may_flip: false
+    refusal: not_the_owner
+    because: "store-a's in-flight completion arrives after the run moved to store-b; its lease does not make it the owner"
+
+  - id: own-stale-epoch-refused-even-for-the-same-store
+    asserts: [A173]
+    actor_store: store-a
+    run_owner: store-a
+    actor_epoch: 0
+    run_epoch: 2
+    may_flip: false
+    refusal: not_the_owner
+    because: "moved away and back: a completion from before the first transfer carries epoch 0 and is refused"
+
+  - id: own-new-owner-at-current-epoch
+    asserts: [A173]
+    actor_store: store-b
+    run_owner: store-b
+    actor_epoch: 1
+    run_epoch: 1
+    may_flip: true
+    because: "the new owner, at the epoch the transfer set, flips the remaining beads"

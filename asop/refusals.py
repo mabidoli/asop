@@ -75,7 +75,7 @@ CODES: dict[str, str] = {
     "bad_ttl": "a lease TTL is not a positive integer within the registry's bound",
     "no_such_lease": "no lease exists for the given key",
     "not_the_holder": "the caller does not hold the lease it tried to act on",
-    "not_the_owner": "the store tried to flip a bead of a run another store owns; a lease is not authority over a run",
+    "not_the_owner": "the store tried to flip a bead of a run another store owns, or owned before an administrative transfer (its ownership epoch is stale); a lease is not authority over a run",
     # -- HTTP surface (agentco/app.py) ---------------------------------------
     "not_an_integer": "a query or body field expected to be an integer was not one",
     "bad_json": "the request body is not valid JSON, or not a JSON object",
@@ -127,6 +127,7 @@ CODES: dict[str, str] = {
     "adoption_invalid": "an adoption is not a valid asop.adoption/1 record of exactly this move (asop.manifest.validate_adoption); nothing was stored",
     "approval_invalid": "an approval is not a valid asop.approval/1 document (asop.chain.validate_approval); nothing was stored",
     "contract_unsupported": "the receiving implementation's installed contract does not implement the record kind or version the request needs; it refuses rather than store what it cannot validate",
+    "transfer_refused:<rule>": "an administrative transfer of run ownership was refused; the rule after the colon is one of asop.ownership.TRANSFER_RULES: malformed, administrator, reason, stale or same_owner",
     # -- the plane's HTTP surface, not the specification ----------------------
     "unknown_field": "a request body on a strict route carried a key the route does not take; a transport-level refusal, distinct from a record's own unknown-field refusal (sop_refused, gate_invalid, ...)",
 }
