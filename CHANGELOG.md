@@ -4,6 +4,52 @@ Version history for the ASOP specification. The specification itself is
 [`ASOP.md`](ASOP.md); this file is where it has been, so the specification can be
 about what it is.
 
+## v3.6.1 / asop-spec 0.6.1 — unreleased
+
+### The member digest is normative (§3.10)
+
+v3.6 said "a member's digest is the store's" and stopped there. That let every store
+invent its own digest, and a manifest written by one engine could not be verified by
+another. v3.6.1 defines it, as exactly what the first store to verify manifests already
+computes, so none of the digests it has recorded change:
+
+- **Input:** the record's validated body. The seven store-assigned fields (`asop_id`,
+  `version`, `status`, `author`, `author_kind`, `superseded_by`, `created_at`) are
+  removed, and the rest is normalised by `validate_asop`: absent and `null` are the same,
+  text is stripped, tags are folded, and the gate carries every field (`null` where
+  unset).
+- **Serialization:** keys sorted by code point, no whitespace, UTF-8, only `"`, `\`
+  and U+0000–U+001F escaped, no Unicode normalization, decimal integers. Floats and lone
+  surrogates are refused.
+- **Hash:** `sha256:` followed by 64 lowercase hex digits.
+
+v3.6 claimed this serialization was RFC 8785's. That was wrong for keys outside the
+Basic Multilingual Plane, because RFC 8785 sorts by UTF-16 code unit and this sorts by
+code point. The text now says which.
+
+One forward rule: a later version MUST NOT change the normalised body of a record that
+uses none of its new fields, or every pinned chain would be stranded.
+
+**Compatibility:** a clarification. No document changes validity, and no digest the
+reference implementation computed under 0.6.0 changes. An implementation that computed
+member digests another way must switch (see `MIGRATION.md`).
+
+### Distribution
+
+- `asop.manifest.body_digest(record, *, asop_id=None)` (new) is the member digest;
+  `STORE_FIELDS`, `canonical_json` and `digest_of` are now exported from `asop`.
+  `pin_manifest`'s default `digest` is `body_digest`, which equals the previous default
+  on the validated body it is given. `canonical_json` refuses a lone surrogate with
+  `ChainContractError` instead of raising `UnicodeEncodeError`.
+- Conformance: `digest.yaml`, 12 vectors. One fixed document pins its digest string.
+  Seven invariance cases (reordered keys, a pretty-printed JSON source with `\u`
+  escapes, store fields present, `null` for absent, a gate field written as `null`,
+  stripped whitespace and folded tag case, and the normalised body itself) must give
+  the same string. Two must differ (changed text, and decomposed Unicode). Two are
+  refused (a float, and an invalid record). Assertions A160–A163.
+- The pinned string was checked byte for byte against the hub's own `store_digest`,
+  under both 0.6.0 and this branch.
+
 ## v3.6 / asop-spec 0.6.0 — 2026-10-17
 
 ### Chains: what a long run taught, as declarations (§3.3, §3.7–§3.10, §5.2–§5.8)

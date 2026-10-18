@@ -1,5 +1,26 @@
 # Migrating to v3.6 / asop-spec 0.6.0
 
+## v3.6.1 / 0.6.1: the member digest
+
+**What changes:** nothing for an implementation that digests members with
+`asop.manifest.digest_of` over the validated body (or now `body_digest`). An
+implementation that computed member digests any other way — over the authored document
+instead of the normalised one, with store fields included, pretty-printed, sorted by
+UTF-16, or with NFC normalization — must switch. Until it does, a manifest it writes will
+not verify against a store that follows §3.10.
+
+**The check:** run `conformance/vectors/digest.yaml` against your digest function.
+`dg-fixed-document` must produce exactly
+`sha256:81235e55f50bed91912dde6fb856bde8a05194f5bc72b2915884108eb28e6555`.
+If it does not, `dg-normalised-body-digests-the-same` tells you which half is wrong:
+it carries the normalised body itself, so when that vector passes and the fixed one
+fails, the difference is in your normaliser, and when both fail, it is in your
+serializer.
+
+Manifests already recorded with non-conforming digests do not become valid by
+upgrading. Re-pin those chains, or adopt them to a re-pinned manifest (§3.10).
+
+
 ## What an adopter at 0.5.0 must do
 
 **Nothing.** v3.6 is additive:

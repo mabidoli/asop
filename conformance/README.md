@@ -16,12 +16,12 @@ A document and the outcome a conforming implementation must reach. Nothing else.
   because: "a human gate nobody is named on is a gate nobody answers"
 ```
 
-`asserts` cites [`assertions.yaml`](assertions.yaml) — the 159 normative rules
+`asserts` cites [`assertions.yaml`](assertions.yaml) — the 163 normative rules
 extracted from the specification — so a rule with no vector is visibly untested
 rather than quietly untested.
 
 > **These counts are facts about the files, and they went stale once.** They read
-> 107/8/39 while the files said 109/10/61 (134/33/140 at v3.5; now 159/56/229, v3.6), which is worse than having no numbers:
+> 107/8/39 while the files said 109/10/61 (134/33/140 at v3.5, 159/56/229 at v3.6; now 163/60/241, v3.6.1), which is worse than having no numbers:
 > a reader cross-checking a coverage claim against this README would have found a
 > mismatch and concluded the claim was wrong. Recount before trusting:
 >
@@ -59,6 +59,7 @@ Exit 0 when every vector matches, 1 otherwise, so CI can gate on it.
 | `vectors/journal.yaml` *(v3.6)* | where does a run stand after a restart, and **what is charged?** |
 | `vectors/staleness.yaml` *(v3.6)* | which runs are **stale**? |
 | `vectors/chain-outcome.yaml` *(v3.6)* | is the **chain** done? |
+| `vectors/digest.yaml` *(v3.6.1)* | what is a chain member's **digest**, byte for byte? |
 
 The third exists because the first two cannot answer it. A failing attestation is
 a *valid document* — refusing it would leave failure unrecordable — so an
@@ -80,14 +81,14 @@ Stated here because a suite that hides its own coverage is worse than a small on
   convention rather than contract, and pinning it would make the suite a stricter
   opinion than the standard. The cost is that two conforming implementations may
   return different shapes for the same input.
-- **A pattern-matcher could still pass.** With 229 vectors, an implementation that
+- **A pattern-matcher could still pass.** With 241 vectors, an implementation that
   recognises these specific documents rather than implementing the rules would
   score full marks. Commands are varied across vectors to make that less
   comfortable, but the real answer is more vectors, and the honest statement is
   that passing proves the rules exercised here and nothing beyond them.
 - **Only refusal codes are compared, not messages.** Two implementations may
   refuse the same document for different stated reasons.
-- **56 of the 159 assertions are cited by a vector** (10 before v3.5, 33 at v3.5; 23 of
+- **60 of the 163 assertions are cited by a vector** (10 before v3.5, 33 at v3.5, 56 at v3.6; A160–A163 all cited; 23 of
   the 25 hand-off assertions, A110–A134, and 23 of the 25 v3.6 assertions, A135–A159,
   are cited; A130, A132, A148 and A152 need a resolver). The other 103 are all
   `testable: true`. 88 of them need artifact types the runner does not have yet —
@@ -248,7 +249,19 @@ Not yet covered by a vector:
   for the same reason as A130/A132 (no resolver in the format).
 - **adoption validation** (`validate_adoption`): the impact computation has vectors; the
   record's digest and impact cross-checks are Python tests only.
-- **digests across languages**: `manifest.yaml` lists pins, not digests. Canonical JSON
-  is specified (§3.10) but no vector yet pins a digest string a second implementation
-  must reproduce.
+- ~~digests across languages~~ — closed in v3.6.1: `digest.yaml` pins a digest string
+  (below).
+
+## v3.6.1 — the member digest (§3.10)
+
+`digest.yaml` pins a fixed document's digest string, which a second implementation must
+reproduce byte for byte, and the cases that must and must not change it. The string was
+cross-checked against an independent store's own digest function before it was written
+down. When the fixed vector fails, `dg-normalised-body-digests-the-same` tells you why:
+it carries the normalised body, so a failure there is in serialization, and a pass there
+puts the failure in normalisation.
+
+The member digest covers the **normalised** body, so it depends on the normaliser's
+output. This suite still does not compare normalised output in general. The digest
+vectors are the one place where it is compared, indirectly.
 

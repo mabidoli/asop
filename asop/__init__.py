@@ -65,7 +65,11 @@ from asop.journal import (
 )
 from asop.manifest import (
     ADOPTION_REQUIRED,
+    STORE_FIELDS,
     adoption_impact,
+    body_digest,
+    canonical_json,
+    digest_of,
     is_pinned,
     manifest_digest,
     manifest_resolver,
@@ -151,6 +155,11 @@ __all__ = [
     # v3.6 — the chain manifest and adoption (§3.10)
     "ADOPTION_REQUIRED",
     "adoption_impact",
+    # v3.6.1 — the member digest, normative (§3.10)
+    "STORE_FIELDS",
+    "body_digest",
+    "canonical_json",
+    "digest_of",
     "is_pinned",
     "manifest_digest",
     "manifest_resolver",

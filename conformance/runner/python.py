@@ -27,7 +27,7 @@ from asop.revision import may_flip
 from asop.chain import (ChainContractError, fanout_startable, join_state, plan_entry, plan_handoffs,
                         plan_join, plan_rework, requires_satisfied, version_in)
 from asop.journal import chain_outcome, charged_failures, resume_point, stale_runs
-from asop.manifest import adoption_impact, manifest_resolver, pin_manifest
+from asop.manifest import adoption_impact, body_digest, manifest_resolver, pin_manifest
 from asop.sop import SopContractError, validate_asop
 
 VECTORS = pathlib.Path(__file__).resolve().parents[1] / "vectors"
@@ -176,7 +176,23 @@ def _chain_outcome(vector: dict, suite: dict) -> tuple[bool, str]:
                     "verdict")
 
 
-V36_QUESTIONS = {"entry": _entry, "rework": _rework, "fanout": _fanout, "manifest": _manifest,
+def _digest(vector: dict, suite: dict) -> tuple[bool, str]:
+    import json
+    doc = json.loads(vector["json"]) if "json" in vector else vector["document"]
+    try:
+        got = body_digest(doc, asop_id=vector.get("asop_id"))
+    except (ChainContractError, SopContractError) as e:
+        if vector.get("expect") == "refuse":
+            return True, f"refuse ({vector.get('refusal', 'sop_refused')})"
+        return False, f"refused: {e}"
+    if vector.get("expect") == "refuse":
+        return False, f"expected a refusal, got {got}"
+    if "digest" in vector:
+        return _compare(got, vector["digest"], "digest")
+    return (False, f"digest must differ from {got}") if got == vector["not_digest"] else (True, "differs")
+
+
+V36_QUESTIONS = {"digest": _digest, "entry": _entry, "rework": _rework, "fanout": _fanout, "manifest": _manifest,
                  "journal": _journal, "staleness": _staleness, "chain-outcome": _chain_outcome}
 
 

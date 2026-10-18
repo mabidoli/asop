@@ -5,9 +5,10 @@
 > other than the one that did the work, and revised from the evidence its own
 > runs produce.*
 
-**Status:** v3.6. v3's review questions (§11) stand as decided on 2026-09-04, except
+**Status:** v3.6.1. v3's review questions (§11) stand as decided on 2026-09-04, except
 §11.4, which was reversed on 2026-10-10 by the hand-offs of §3.7. v3.1 through v3.4 are
-corrections; v3.5 and v3.6 are additive ([`CHANGELOG.md`](CHANGELOG.md),
+corrections; v3.5 and v3.6 are additive, and v3.6.1 makes the member digest
+normative ([`CHANGELOG.md`](CHANGELOG.md),
 [`MIGRATION.md`](MIGRATION.md)). Every v3.6 behaviour is opt-in by declaration: a v3.5
 record, gate or engine means exactly what it meant.
 Supersedes v2.
@@ -730,9 +731,50 @@ is written when a chain starts:
   manifests (`adoption_impact`), never typed. In-flight runs finish under the version
   they started under (§2.1); runs filed after the adoption resolve from the new
   manifest. Using an unpinned version without one is `adoption_required`.
-- **Digests.** A manifest's digest is sha256 over its canonical JSON (sorted keys, no
-  whitespace, UTF-8); nothing in a manifest is a float, so this is RFC 8785's result
-  too. A member's digest is the store's, and engines compare the strings.
+- **Digests** are defined below, and since v3.6.1 they are normative: two
+  implementations given the same record MUST produce the same string.
+
+**The digest** *(normative, v3.6.1)*. v3.6 said "a member's digest is the store's",
+which let every store invent its own and made a manifest written by one engine
+unverifiable by another. The rule is now the one the first store to verify manifests
+already applied, byte for byte, so no digest it recorded changes:
+
+1. **Input.** A member digest covers the record's **validated body**: the
+   store-assigned fields — `asop_id`, `version`, `status`, `author`, `author_kind`,
+   `superseded_by`, `created_at` — are removed, and the rest is normalised by the
+   record contract (`validate_asop`, §3.1–§3.7). Normalisation is what makes "absent"
+   and "`null`" the same for every optional field, strips surrounding whitespace from
+   text, folds tags to lower case, fills `after`, and writes the normalised gate with
+   **every** gate field, `null` where unset, plus `schema_version`. Normalisation is
+   idempotent, so a validated body digests as the document it came from. A record the
+   contract refuses has no digest, and cannot be pinned.
+2. **Serialization** (`canonical_json`):
+   - object keys sorted by Unicode **code point** — not by UTF-16 code unit, which is
+     where this departs from RFC 8785, for keys outside the Basic Multilingual Plane;
+   - no whitespace: `,` between items, `:` between key and value;
+   - strings encoded as UTF-8, unescaped except `"` → `\"`, `\` → `\\`, and
+     U+0000–U+001F: `\b \f \n \r \t` in short form, the rest as `\u00xx` with
+     lowercase hex. `/`, U+007F and everything above U+001F are written as themselves;
+   - **no Unicode normalization**: code points are hashed as given, so a decomposed
+     `é` is a different string, and a different digest, from a precomposed one;
+   - integers in decimal with no leading zeros, no `+` and no exponent; `true`,
+     `false` and `null` as written;
+   - a **float** is refused, and so is a string with a lone surrogate: neither has a
+     form two languages agree on.
+3. **Hash and encoding.** SHA-256 over those bytes, written `sha256:` followed by 64
+   **lowercase** hex digits (`digest_of`; for a record, `body_digest`).
+
+A manifest's own digest is the same serialization and hash over the validated
+manifest. The vectors in `digest.yaml` pin a document and its digest string, and the
+cases that must and must not change it.
+
+**What this binds in later versions.** Because the normalised gate writes every gate
+field, a later version that added a gate field to the normalised output would change
+the digest of every record, including the ones that do not use it, and strand every
+pinned chain. A later version therefore MUST NOT change the normalised body of a record
+that uses none of its new fields. The three gate fields v3.6 added (`default`,
+`cannot_evaluate_exit`, `min_cases`) are part of the v3.6.1 digest input as `null`; a
+v3.5 record's digest under v3.6.1 includes them.
 
 **Opt-in, deliberately.** An engine that starts chains without a manifest is the v3.5
 engine it always was, resolving ranges at filing, and conforms to v3.6; it does not get

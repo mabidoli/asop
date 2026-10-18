@@ -14,7 +14,7 @@ been implemented by anyone who did not also write it, which is the honest status
 and the thing I would most like to change.
 
 What exists to make that possible: a normative [schema](schema/v1/) as JSON
-Schema in YAML, and [229 conformance vectors](conformance/) as data, so an
+Schema in YAML, and [241 conformance vectors](conformance/) as data, so an
 implementation in any language can prove it conforms without depending on this
 package or reading a line of Python.
 
@@ -89,7 +89,7 @@ absent), plus `"schema_version": 1`.
 
 ## Versioning
 
-The specification is at **v3.6** and the package at **0.6.0**. v3.6 is additive: an
+The specification is at **v3.6.1** and the package at **0.6.1**. v3.6 is additive (v3.6.1 makes the chain-member digest normative): an
 adopter at 0.5.0 needs to change nothing, and [`MIGRATION.md`](MIGRATION.md) says what
 to adopt first and what was left for v4.
 
@@ -116,8 +116,8 @@ it is a framework wearing a standard's clothes.
 
 ## Testing
 
-    uv run --extra dev pytest -q                                         # 353 tests
-    uv run --with pyyaml python conformance/runner/python.py --verbose   # 229 vectors
+    uv run --extra dev pytest -q                                         # 362 tests
+    uv run --with pyyaml python conformance/runner/python.py --verbose   # 241 vectors
 
 `pytest` is a dev dependency, not a default one — a bare `uv run pytest` fails with
 "Failed to spawn: `pytest`" because nothing is installed to spawn; `--extra dev` is

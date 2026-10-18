@@ -52,12 +52,24 @@ IMPACT_EFFECTS = ("unchanged", "changed", "added", "removed")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 
 
+#: The fields of a stored ASOP record that the STORE assigns (ASOP.md §3.10,
+#: v3.6.1). They change without the procedure changing — a status flip, a
+#: superseding version — so they are not part of what a member digest covers.
+STORE_FIELDS = ("asop_id", "version", "status", "author", "author_kind", "superseded_by", "created_at")
+
+
 def canonical_json(value: Any) -> bytes:
-    """Sorted keys, no whitespace, UTF-8, no NaN. For the documents this module
-    digests — strings, integers, booleans, lists and mappings — this is the
-    same byte string RFC 8785 produces, which is what lets two engines in
-    different languages agree on a digest. A float is refused rather than
-    risked: two languages print floats differently."""
+    """The canonical serialization of ASOP.md §3.10 (normative since v3.6.1):
+
+    - object keys sorted by Unicode CODE POINT (not UTF-16 code unit — this is
+      where it departs from RFC 8785, for keys outside the BMP), no duplicates;
+    - no whitespace anywhere: `,` between items, `:` between key and value;
+    - strings as UTF-8, unescaped except `"`, `\\`, and the controls
+      U+0000–U+001F (`\\b \\f \\n \\r \\t` short, the rest `\\u00xx`
+      lowercase); no Unicode normalization — code points are hashed as given;
+    - integers in decimal, no leading zeros, no `+`, no exponent; `true`,
+      `false`, `null` as written. A float is refused: two languages print
+      floats differently, and a digest is no place to find that out."""
     def check(v: Any) -> None:
         if isinstance(v, float):
             raise ChainContractError("a digested document may not contain a float; write it as a string.")
@@ -70,13 +82,38 @@ def canonical_json(value: Any) -> bytes:
             for x in v:
                 check(x)
     check(value)
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-                      allow_nan=False).encode("utf-8")
+    text = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    try:
+        return text.encode("utf-8")
+    except UnicodeEncodeError as e:  # a lone surrogate has no UTF-8 form
+        raise ChainContractError("a digested document's strings must be valid Unicode (no lone surrogates).") from e
 
 
 def digest_of(value: Any) -> str:
-    """`sha256:<hex>` of `canonical_json(value)`."""
+    """`sha256:` and the 64 lowercase hex digits of SHA-256 over
+    `canonical_json(value)`."""
     return "sha256:" + hashlib.sha256(canonical_json(value)).hexdigest()
+
+
+def body_digest(record: Mapping, *, asop_id: Optional[str] = None) -> str:
+    """A chain member's digest (ASOP.md §3.10): the digest of the record's
+    VALIDATED body.
+
+    1. drop the store-assigned fields (`STORE_FIELDS`) when present — a stored
+       record and the body it was authored from digest the same;
+    2. normalise the rest with `validate_asop` (which refuses an invalid body,
+       `SopContractError`); absent and `null` optional fields are the same
+       thing there, and the normalised gate carries every gate field, `null`
+       where unset;
+    3. `digest_of` the result.
+
+    Normalisation is idempotent, so the normalised body digests the same as
+    the document it came from. `asop_id` defaults to the record's own."""
+    from asop.sop import validate_asop
+    if not isinstance(record, Mapping):
+        raise ChainContractError("a member digest is computed over an ASOP record (a mapping).")
+    body = {k: v for k, v in record.items() if k not in STORE_FIELDS}
+    return digest_of(validate_asop(body, asop_id=asop_id if asop_id is not None else record.get("asop_id")))
 
 
 def manifest_digest(manifest: Mapping) -> str:
@@ -162,12 +199,13 @@ def _edges(body: Mapping) -> list[dict]:
 
 def pin_manifest(asop_id: str, version: int, body: Mapping, resolve: Resolver, *, chain: str,
                  components: Iterable[Mapping] = (),
-                 digest: Callable[[Mapping], str] = digest_of) -> dict:
+                 digest: Callable[[Mapping], str] = body_digest) -> dict:
     """Resolve, once, every procedure a chain started from `(asop_id, version)`
     can reach, and pin it (§3.10). `resolve` is the store's resolver AT CHAIN
     START; `body` is the starting record's validated body. `digest` computes a
-    member's digest from its validated body — the store may pass its own,
-    provided every engine reading the manifest compares the same strings.
+    member's digest from its validated body; the default is `body_digest`,
+    which is the normative member digest (§3.10). Because normalisation is
+    idempotent, it equals `digest_of` of an already-validated body.
 
     Strict, because pinning is the point: a reference that resolves to nothing,
     or two references that would need two versions of one procedure, refuse
