@@ -37,11 +37,14 @@ from asop.errors import Refusal
 TRANSFER_SCHEMA = "asop.ownership-transfer/1"
 
 ADMINISTRATORS_ENV_VAR = "ASOP_ADMINISTRATORS"
+#: The name the first implementation shipped, read when the standard's is
+#: unset — the same courtesy every other registry extends (§9).
+LEGACY_ADMINISTRATORS_ENV_VAR = "AGENTCO_ADMINS"
 
 TRANSFER_REFUSED = "transfer_refused"
 TRANSFER_RULES: dict[str, str] = {
     "malformed": "the transfer is not a valid asop.ownership-transfer/1 document",
-    "administrator": "the actor is not a declared administrator who is also a declared human",
+    "administrator": "the actor is a declared human but not a declared administrator (a non-human is human_required)",
     "reason": "the transfer gives no reason",
     "stale": "the transfer's `from` or `epoch` is not the run's current owner and epoch + 1",
     "same_owner": "the transfer moves the run to the store that already owns it",
@@ -53,7 +56,12 @@ def administrators_from_env(value: Optional[str] = None) -> frozenset[str]:
     spelling — the format of every other registry (§9). An empty declaration
     makes nobody an administrator: no run can be transferred, which is the
     v3.6 behaviour, and the closed default."""
-    raw = value if value is not None else os.environ.get(ADMINISTRATORS_ENV_VAR)
+    if value is not None:
+        raw = value
+    else:
+        raw = os.environ.get(ADMINISTRATORS_ENV_VAR)
+        if raw is None:
+            raw = os.environ.get(LEGACY_ADMINISTRATORS_ENV_VAR)
     return frozenset(p.strip() for p in (raw or "").split(",") if p.strip())
 
 
@@ -79,7 +87,8 @@ def validate_transfer(doc: Any, *, run: Mapping, administrators: Iterable[str],
     Accepted only as the next transfer of THIS run: `from` is its current
     owner, `epoch` is its current epoch + 1, `to` is a different store. `by` is
     the authenticated actor (§9, set by the transport, never the body) and must
-    be a declared administrator AND a declared human. Nothing here consults the
+    be a declared human (else `human_required`) AND a declared administrator
+    (else `transfer_refused:administrator`). Nothing here consults the
     former owner: an unreachable owner, or one whose credential was revoked,
     cannot block its own replacement. Raises `Refusal`
     (`transfer_refused:<rule>`)."""
@@ -90,6 +99,10 @@ def validate_transfer(doc: Any, *, run: Mapping, administrators: Iterable[str],
     if extra:
         raise _refuse("malformed", f"transfer: unknown field(s) {', '.join(sorted(map(str, extra)))}",
                       "Remove them; the record is closed.")
+    # The caller first (§10's order): who is asking is settled before what they sent.
+    if _name(doc.get("by")) is not None:
+        from asop.revision import require_declared_human
+        require_declared_human(doc["by"], humans, verb="run_transfer")
     for key in ("run", "from", "to", "by", "at"):
         if _name(doc.get(key)) is None:
             raise _refuse("malformed", f"transfer '{key}' must be an exact, non-empty name",
@@ -99,9 +112,9 @@ def validate_transfer(doc: Any, *, run: Mapping, administrators: Iterable[str],
         raise _refuse("malformed", f"transfer 'epoch' must be an integer >= 1, got {epoch!r}",
                       "Set it to the run's current epoch + 1.")
     by = doc["by"]
-    if by not in set(administrators) or by not in set(humans):
+    if by not in set(administrators):
         raise _refuse("administrator",
-                      f"{by!r} is not a declared administrator who is a declared human",
+                      f"{by!r} is a declared human but not a declared administrator",
                       "Have a person the operator declared in ASOP_ADMINISTRATORS (and ASOP_HUMANS) "
                       "record it. No agent and no store transfers a run.")
     reason = doc.get("reason")

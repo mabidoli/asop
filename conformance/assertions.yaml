@@ -1102,3 +1102,9 @@
   applies_to: run
   testable: true
   violation: "A transfer re-opens or re-attests a completed step."
+- id: A175
+  section: "10"
+  rule: "A non-human (including an unnamed caller) attempting chain_adopt, approve or run_transfer is refused human_required, before the request's content is checked; a declared human passes this check."
+  applies_to: run
+  testable: true
+  violation: "An agent records an adoption, an approval or a transfer, or is refused capability_mismatch, which means a role binding."

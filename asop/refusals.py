@@ -126,8 +126,10 @@ CODES: dict[str, str] = {
     "chain_unknown": "no manifest has been recorded for the chain named, so it has nothing to resolve from or adopt away from",
     "adoption_invalid": "an adoption is not a valid asop.adoption/1 record of exactly this move (asop.manifest.validate_adoption); nothing was stored",
     "approval_invalid": "an approval is not a valid asop.approval/1 document (asop.chain.validate_approval); nothing was stored",
+    "human_required": "an actor that is not a declared human attempted a human-only chain or ownership verb (chain_adopt, approve, run_transfer); asop.revision.require_declared_human",
     "contract_unsupported": "the receiving implementation's installed contract does not implement the record kind or version the request needs; it refuses rather than store what it cannot validate",
     "transfer_refused:<rule>": "an administrative transfer of run ownership was refused; the rule after the colon is one of asop.ownership.TRANSFER_RULES: malformed, administrator, reason, stale or same_owner",
+    "transfer_invalid": "LEGACY (first implementation): a refused ownership transfer; the specified codes are transfer_refused:reason and transfer_refused:same_owner (LEGACY_USES)",
     # -- the plane's HTTP surface, not the specification ----------------------
     "unknown_field": "a request body on a strict route carried a key the route does not take; a transport-level refusal, distinct from a record's own unknown-field refusal (sop_refused, gate_invalid, ...)",
 }
@@ -141,6 +143,7 @@ CHAIN_RECORD_CODES = (
     "manifest_digest_mismatch",
     "manifest_unknown",
     "chain_unknown",
+    "human_required",
     "adoption_invalid",
     "approval_invalid",
     "contract_unsupported",
@@ -152,4 +155,15 @@ CHAIN_RECORD_CODES = (
 #: migrate; readers should accept both.
 LEGACY_USES = {
     ("manifest_member_unknown", "impact or adoption target manifest not recorded"): "manifest_unknown",
+    ("capability_mismatch", "a non-human attempting chain_adopt or approve"): "human_required",
+    ("capability_mismatch", "a non-human attempting run_transfer"): "human_required",
+    ("capability_mismatch", "a declared human who is not an administrator attempting run_transfer"):
+        "transfer_refused:administrator",
+    ("transfer_invalid", "a transfer with no reason"): "transfer_refused:reason",
+    ("transfer_invalid", "a transfer to the store that already owns the run"): "transfer_refused:same_owner",
 }
+
+#: How long a reader must keep accepting a legacy use: through the next minor
+#: release of the specification (v3.7), after which writers will have had one
+#: minor to move. Writers SHOULD emit the specified code now.
+LEGACY_UNTIL = "v3.7"

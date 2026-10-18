@@ -92,6 +92,7 @@ from asop.ownership import (
     ownership_of,
     validate_transfer,
 )
+from asop.revision import HUMAN_REQUIRED_VERBS, require_declared_human
 from asop.sop import (
     ASOP,
     ASOP_VERSION,
@@ -196,6 +197,8 @@ __all__ = [
     "check_flip",
     "ownership_of",
     "validate_transfer",
+    "HUMAN_REQUIRED_VERBS",
+    "require_declared_human",
     # v3.6 — journal, resume, staleness, chain outcome (§5.6–§5.8)
     "FAULT_CLASSES",
     "charged_failures",

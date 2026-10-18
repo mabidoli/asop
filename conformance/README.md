@@ -16,12 +16,12 @@ A document and the outcome a conforming implementation must reach. Nothing else.
   because: "a human gate nobody is named on is a gate nobody answers"
 ```
 
-`asserts` cites [`assertions.yaml`](assertions.yaml) — the 174 normative rules
+`asserts` cites [`assertions.yaml`](assertions.yaml) — the 175 normative rules
 extracted from the specification — so a rule with no vector is visibly untested
 rather than quietly untested.
 
 > **These counts are facts about the files, and they went stale once.** They read
-> 107/8/39 while the files said 109/10/61 (134/33/140 at v3.5, 159/56/229 at v3.6; now 174/70/275, v3.6.1), which is worse than having no numbers:
+> 107/8/39 while the files said 109/10/61 (134/33/140 at v3.5, 159/56/229 at v3.6; now 175/71/283, v3.6.1), which is worse than having no numbers:
 > a reader cross-checking a coverage claim against this README would have found a
 > mismatch and concluded the claim was wrong. Recount before trusting:
 >
@@ -83,14 +83,14 @@ Stated here because a suite that hides its own coverage is worse than a small on
   convention rather than contract, and pinning it would make the suite a stricter
   opinion than the standard. The cost is that two conforming implementations may
   return different shapes for the same input.
-- **A pattern-matcher could still pass.** With 275 vectors, an implementation that
+- **A pattern-matcher could still pass.** With 283 vectors, an implementation that
   recognises these specific documents rather than implementing the rules would
   score full marks. Commands are varied across vectors to make that less
   comfortable, but the real answer is more vectors, and the honest statement is
   that passing proves the rules exercised here and nothing beyond them.
 - **Only refusal codes are compared, not messages.** Two implementations may
   refuse the same document for different stated reasons.
-- **70 of the 174 assertions are cited by a vector** (10 before v3.5, 33 at v3.5, 56 at v3.6; A160–A173 all cited, and A174 — a transfer rewrites no completed step — is a Python test, because a vector holds no run tree; 23 of
+- **71 of the 175 assertions are cited by a vector** (10 before v3.5, 33 at v3.5, 56 at v3.6; A160–A173 and A175 all cited, and A174 — a transfer rewrites no completed step — is a Python test, because a vector holds no run tree; 23 of
   the 25 hand-off assertions, A110–A134, and 23 of the 25 v3.6 assertions, A135–A159,
   are cited; A130, A132, A148 and A152 need a resolver). The other 104 are all
   `testable: true`. 88 of them need artifact types the runner does not have yet —

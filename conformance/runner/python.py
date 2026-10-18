@@ -221,6 +221,9 @@ def _chain_store(vector: dict, suite: dict) -> tuple[bool, str]:
                 check_pinned(vector["manifest"], vector["asop_id"], vector.get("version"))
             elif q == "schema":
                 require_schema(vector["document"])
+            elif q == "human":
+                from asop.revision import require_declared_human
+                require_declared_human(vector["actor"], suite.get("humans") or [], verb=vector["verb"])
             else:
                 return False, f"unknown question {q!r}"
         except Refusal:
@@ -238,10 +241,11 @@ def _transfer(vector: dict, suite: dict) -> tuple[bool, str]:
     """v3.6.1: may an administrator move this run's ownership? (§7.2)"""
     from asop.ownership import apply_transfer
     try:
-        after = apply_transfer(vector["run"], vector["document"], administrators=suite.get("administrators") or [],
+        after = apply_transfer(vector["run"], vector["document"],
+                               administrators=vector.get("administrators") or suite.get("administrators") or [],
                                humans=suite.get("humans") or [])
     except Refusal as r:
-        if r.code.split(":", 1)[0] + ":<rule>" not in REFUSAL_CODES:
+        if r.code not in REFUSAL_CODES and r.code.split(":", 1)[0] + ":<rule>" not in REFUSAL_CODES:
             return False, f"{r.code!r} is not in asop.refusals"
         if vector["expect"] != "refuse":
             return False, f"refused {r.code}: {r.message}"

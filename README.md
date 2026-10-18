@@ -14,7 +14,7 @@ been implemented by anyone who did not also write it, which is the honest status
 and the thing I would most like to change.
 
 What exists to make that possible: a normative [schema](schema/v1/) as JSON
-Schema in YAML, and [275 conformance vectors](conformance/) as data, so an
+Schema in YAML, and [283 conformance vectors](conformance/) as data, so an
 implementation in any language can prove it conforms without depending on this
 package or reading a line of Python.
 
@@ -117,8 +117,8 @@ it is a framework wearing a standard's clothes.
 
 ## Testing
 
-    uv run --extra dev pytest -q                                         # 399 tests
-    uv run --with pyyaml python conformance/runner/python.py --verbose   # 275 vectors
+    uv run --extra dev pytest -q                                         # 402 tests
+    uv run --with pyyaml python conformance/runner/python.py --verbose   # 283 vectors
 
 `pytest` is a dev dependency, not a default one — a bare `uv run pytest` fails with
 "Failed to spawn: `pytest`" because nothing is installed to spawn; `--extra dev` is

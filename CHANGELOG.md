@@ -119,6 +119,30 @@ Ownership is run state, never ASOP-record state. It cannot enter a member digest
 record schema has no such field, and a record carrying one is refused (a test pins
 this).
 
+### `human_required`, and §11.11 closed
+
+There is now one dedicated code, `human_required`. It is raised when an authenticated
+actor that is not a declared human attempts `chain_adopt`, `approve` or `run_transfer`,
+and it comes before any check of the request's content (§10's order, step 2).
+
+- **Reference.** `asop.revision.require_declared_human` and `HUMAN_REQUIRED_VERBS`. The
+  existing `require_human` (the revision policy's `human_only` rule) is untouched.
+- **Transfers.** `run_transfer` raises `human_required` for a non-human, and
+  `transfer_refused:administrator` only for a human who is not an administrator.
+- **Every other human-only verb keeps its code.** §10 now has a table of them:
+  `sop_retire` and `promote` stay `revision_policy:human_only`; verifier answers and
+  `answer` stay `unauthenticated`; a `human` role's step stays `capability_mismatch`.
+  No v3.x behaviour changes.
+- **`capability_mismatch` keeps its meaning,** a role or capability binding. For the
+  human-only case it is a legacy alias. Readers MUST accept it through v3.7
+  (`asop.refusals.LEGACY_UNTIL`); writers SHOULD emit `human_required` now.
+- **Also recorded as legacy uses:** the first implementation's `transfer_invalid` for a
+  reasonless transfer or a transfer to the current owner.
+- **`ASOP_ADMINISTRATORS`** falls back to `AGENTCO_ADMINS`, like every other registry.
+- **Conformance:** 7 `chain-store.yaml` vectors (each verb refused for an agent and
+  accepted for a person, plus an anonymous caller), and 2 changed or added
+  `transfer.yaml` vectors. Assertion A175.
+
 **Compatibility:** a clarification. No document changes validity, and no digest the
 reference implementation computed under 0.6.0 changes. An implementation that computed
 member digests another way must switch (see `MIGRATION.md`). The refusal codes are

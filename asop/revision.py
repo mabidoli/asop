@@ -227,6 +227,35 @@ def may_flip(actor_store: Optional[str], run_owner: Optional[str], *,
             and (actor_epoch or 0) == (run_epoch or 0))
 
 
+#: The verbs that refuse a non-human with `human_required` (ASOP.md §10,
+#: v3.6.1). `retire` and `promote` are human verbs too, but they keep the code
+#: they always had, `revision_policy:human_only`; answering a human gate keeps
+#: `unauthenticated`. See ASOP.md §10, "Human-only verbs".
+HUMAN_REQUIRED_VERBS = ("chain_adopt", "approve", "run_transfer")
+
+
+def require_declared_human(actor: Optional[str], humans: Iterable[str], *, verb: str) -> str:
+    """Refuse `human_required` unless `actor` is a declared human (§9).
+
+    For the human-only verbs of `HUMAN_REQUIRED_VERBS`. `actor` is the
+    AUTHENTICATED caller — authentication is the transport's, so an identity
+    that does not resolve at all is `unauthenticated` before this is asked. This
+    is the next question: the caller is known, and is not a person the operator
+    declared. `capability_mismatch` is NOT this: it is a binding that cannot
+    fill a role, and readers accept it here only as a legacy alias
+    (`asop.refusals.LEGACY_USES`). Not `require_human`, which is the revision
+    policy's `human_only` rule for `retire` and `promote`."""
+    from asop.errors import Refusal
+    if kind_of(actor, humans) != HUMAN:
+        raise Refusal(
+            code="human_required",
+            message=f"{actor!r} is not a declared human, and '{verb}' is a person's act",
+            remediation="Have a person the operator declared in ASOP_HUMANS do it. An agent may "
+                        "prepare it and ask; it may not record it.",
+        )
+    return actor
+
+
 def kind_of(actor: Optional[str], humans: Iterable[str]) -> str:
     """`human` if the operator declared this actor human; `agent` otherwise.
 

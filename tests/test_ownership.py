@@ -55,7 +55,9 @@ def test_completed_steps_are_not_rewritten():
 
 def test_refusal_rules():
     assert rule({**T, "by": "dana"}) == "transfer_refused:administrator"
-    assert rule(T, humans=["dana"]) == "transfer_refused:administrator", "an administrator must also be human"
+    assert rule(T, humans=["dana"]) == "human_required", "an administrator must also be human"
+    assert rule({**T, "by": "ops-bot"}, admins=["ines", "ops-bot"]) == "human_required"
+    assert rule({**T, "by": "ops-bot", "reason": ""}) == "human_required", "the caller is asked first"
     assert rule(T, admins=[]) == "transfer_refused:administrator", "an empty registry transfers nothing"
     assert rule({**T, "reason": ""}) == "transfer_refused:reason"
     assert rule({k: v for k, v in T.items() if k != "reason"}) == "transfer_refused:reason"
@@ -105,7 +107,10 @@ def test_administrators_from_env(monkeypatch):
     monkeypatch.setenv("ASOP_ADMINISTRATORS", " ines , ops ")
     assert administrators_from_env() == {"ines", "ops"}
     monkeypatch.delenv("ASOP_ADMINISTRATORS")
+    monkeypatch.delenv("AGENTCO_ADMINS", raising=False)
     assert administrators_from_env() == frozenset()
+    monkeypatch.setenv("AGENTCO_ADMINS", "ines")
+    assert administrators_from_env() == {"ines"}, "the pre-standard name is read when the standard's is unset"
 
 
 def test_ownership_never_enters_the_member_digest():

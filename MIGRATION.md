@@ -32,10 +32,20 @@ To adopt the transfer:
 
 The checks are `transfer.yaml` and the epoch vectors in `ownership.yaml`.
 
-**Refusal codes (§10).** A store of chain records returns the eight codes of §10.
-There is one change to make: raise `manifest_unknown`, not `manifest_member_unknown`,
-when an impact or adoption names a target manifest that is not recorded for the chain.
-Until a store does, readers accept both. An implementation that validated
+**Refusal codes (§10).** A store of chain records returns the codes of §10.
+
+What a hub must change; readers accept the old codes through v3.7:
+1. In `impact()` and adoption, raise `manifest_unknown`, not `manifest_member_unknown`,
+   when the target manifest is not recorded for the chain.
+2. On `chain_adopt`, `approve` and `run_transfer`, raise `human_required`, not
+   `capability_mismatch`, for a caller that is not a declared human. Do this before
+   checking the request's content. On `run_transfer`, a declared human who is not an
+   administrator is `transfer_refused:administrator`.
+3. On `run_transfer`, raise `transfer_refused:reason` and `transfer_refused:same_owner`,
+   not `transfer_invalid`.
+4. Read `ASOP_ADMINISTRATORS`. `AGENTCO_ADMINS` is still read when it is unset.
+
+Keep `capability_mismatch` for its own meaning: a binding that cannot fill a role. An implementation that validated
 `asop.approval/1` against the schema itself can call `asop.chain.validate_approval`
 instead; it applies the same rules. The check is `conformance/vectors/chain-store.yaml`.
 

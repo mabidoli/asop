@@ -9,10 +9,12 @@
 #   approval — is `document` a valid asop.approval/1?
 #   pinned   — may a run of `asop_id` (at `version`) file under `manifest`?
 #   schema   — does this implementation implement the record's `schema`?
+#   human    — may `actor` perform the human-only `verb`, given the suite's `humans`?
 # `expect` is accept, or refuse with `refusal`, which must be a catalogued code.
 # The digests in `store` are the §3.10 member digests of the records beside them.
 
 artifact: chain-store
+humans: [dana]
 store:
   intake:
     1:
@@ -553,3 +555,54 @@ vectors:
       schema: asop.approval/1
     expect: accept
     because: a kind this contract implements
+  - id: cs-human-adopts
+    asserts: [A175]
+    question: human
+    verb: chain_adopt
+    actor: dana
+    expect: accept
+    because: "a declared human records the adoption"
+  - id: cs-agent-may-not-adopt
+    asserts: [A175]
+    question: human
+    verb: chain_adopt
+    actor: ops-bot
+    expect: refuse
+    refusal: human_required
+    because: "an agent may read the impact and propose; moving a chain is a person's act"
+  - id: cs-human-approves
+    asserts: [A175]
+    question: human
+    verb: approve
+    actor: dana
+    expect: accept
+  - id: cs-agent-may-not-approve
+    asserts: [A175]
+    question: human
+    verb: approve
+    actor: ops-bot
+    expect: refuse
+    refusal: human_required
+    because: "an approval is a person's; capability_mismatch is a role binding, not this"
+  - id: cs-human-transfers
+    asserts: [A175]
+    question: human
+    verb: run_transfer
+    actor: dana
+    expect: accept
+    because: "human-ness is the first question; whether dana is also an administrator is transfer.yaml's"
+  - id: cs-agent-may-not-transfer
+    asserts: [A175]
+    question: human
+    verb: run_transfer
+    actor: ops-bot
+    expect: refuse
+    refusal: human_required
+  - id: cs-anonymous-is-not-human
+    asserts: [A175]
+    question: human
+    verb: approve
+    actor: null
+    expect: refuse
+    refusal: human_required
+    because: "fail closed: an unnamed in-process caller is an agent"

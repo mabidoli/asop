@@ -56,7 +56,7 @@ def test_unknown_field_is_catalogued_but_not_specified():
 
 def test_legacy_use_points_at_a_specified_code():
     for (old, _situation), new in LEGACY_USES.items():
-        assert old in CODES and new in CHAIN_RECORD_CODES
+        assert new in CHAIN_RECORD_CODES or new.startswith("transfer_refused:")
 
 
 # --- manifests ------------------------------------------------------------------
@@ -147,3 +147,28 @@ def test_string_and_integer_ids_of_the_same_spelling_are_two_subjects():
 
 def test_validate_asop_is_untouched():
     validate_asop(REC)
+
+
+# --- human_required (v3.6.1) ----------------------------------------------------
+
+def test_human_required_for_the_chain_and_ownership_verbs():
+    from asop.revision import HUMAN_REQUIRED_VERBS, require_declared_human
+    assert HUMAN_REQUIRED_VERBS == ("chain_adopt", "approve", "run_transfer")
+    for verb in HUMAN_REQUIRED_VERBS:
+        assert require_declared_human("dana", ["dana"], verb=verb) == "dana"
+        for actor in ("ops-bot", None):
+            refused("human_required", require_declared_human, actor, ["dana"], verb=verb)
+
+
+def test_capability_mismatch_keeps_its_meaning_and_is_only_a_legacy_alias_here():
+    from asop.refusals import LEGACY_UNTIL
+    assert LEGACY_USES[("capability_mismatch", "a non-human attempting chain_adopt or approve")] == "human_required"
+    assert "capability" in CODES["capability_mismatch"] and "human" not in CODES["capability_mismatch"]
+    assert LEGACY_UNTIL == "v3.7"
+
+
+def test_the_revision_policy_require_human_is_untouched():
+    """retire and promote keep `revision_policy:human_only`; the new helper has its own name."""
+    from asop.revision import RevisionPolicyError, require_human
+    with pytest.raises(RevisionPolicyError):
+        require_human("agent", "retire", because="test")

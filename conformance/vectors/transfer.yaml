@@ -56,12 +56,21 @@ vectors:
     because: "a declared human who is not an administrator may not move a run"
 
   - id: tr-refuse-agent-administrator
-    asserts: [A172]
+    asserts: [A172, A175]
     run: *run
     document: {<<: *t, by: ops-bot}
     expect: refuse
-    refusal: transfer_refused:administrator
-    because: "the transfer is human-only; an agent is never an administrator for this"
+    refusal: human_required
+    because: "the transfer is human-only: an agent is refused human_required, before anything about the record is asked"
+
+  - id: tr-refuse-listed-agent-administrator
+    asserts: [A175]
+    run: *run
+    document: {<<: *t, by: ops-bot}
+    administrators: [ines, ops-bot]
+    expect: refuse
+    refusal: human_required
+    because: "being listed as an administrator does not make an agent a person"
 
   - id: tr-refuse-no-reason
     asserts: [A172]

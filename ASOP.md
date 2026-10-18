@@ -1277,12 +1277,12 @@ to one.
 | `handoff(run_id, requests?)` *(v3.5)* | the engine that owns the run | run complete | files what §3.7 decides; records each filing, duplicate and refusal with the run as parent | `handoff_refused:<rule>` |
 | `chain_start(asop_id, inputs)` *(v3.6)* | human or agent | as `run`; every reachable member pinnable | pins the chain manifest (§3.10), then files the first run as `run` does | as `run`, `sop_refused` |
 | `manifest_record(manifest)` *(v3.6.1)* | the engine | every member held, runnable, at the store's digest | stores the manifest; the first one recorded for a chain is the one it starts under | `manifest_invalid`, `manifest_member_unknown`, `manifest_digest_mismatch`, `contract_unsupported` |
-| `chain_adopt(chain, manifest)` *(v3.6)* | a declared human | the chain has a manifest | records an adoption with the computed impact; later filings resolve from the new manifest | `revision_policy:human_only` (see §11.11), `chain_unknown`, `manifest_unknown`, `adoption_invalid`, `work_conflict`, `contract_unsupported` |
-| `approve(artefact, digest, subset?)` *(v3.6.1)* | a declared human | — | records an `asop.approval/1`; append-only | `approval_invalid`, `contract_unsupported`; a non-human caller: §11.11 |
+| `chain_adopt(chain, manifest)` *(v3.6)* | a declared human | the chain has a manifest | records an adoption with the computed impact; later filings resolve from the new manifest | `human_required`, `chain_unknown`, `manifest_unknown`, `adoption_invalid`, `work_conflict`, `contract_unsupported` |
+| `approve(artefact, digest, subset?)` *(v3.6.1)* | a declared human | — | records an `asop.approval/1`; append-only | `human_required`, `approval_invalid`, `contract_unsupported` |
 | `rework(run_id, trigger)` *(v3.6)* | the engine that owns the run | a declared edge matches | re-runs steps, re-files the owner, or escalates when the rounds are spent (§3.9) | `rework_refused:<rule>` |
 | `answer(question, answer)` *(v3.6)* | a declared human | the question exists | records the answer as an artefact; everything built on the open question is stale (§5.7) | `unauthenticated` |
 | `resume(run_id)` *(v3.6)* | the engine that owns the run | — | re-runs interrupted steps from the journal; not an attempt (§5.6) | `not_the_owner` |
-| `run_transfer(run_id, to, reason)` *(v3.6.1)* | a declared administrator who is human | — | moves ownership, appends to `ownership_history`, bumps the epoch; completed steps untouched (§7.2) | `transfer_refused:<rule>` |
+| `run_transfer(run_id, to, reason)` *(v3.6.1)* | a declared administrator who is human | — | moves ownership, appends to `ownership_history`, bumps the epoch; completed steps untouched (§7.2) | `human_required`, `transfer_refused:<rule>` |
 
 ### 8.3 Executing
 
@@ -1418,8 +1418,9 @@ stack trace. Codes relevant to ASOPs, from `asop.refusals`, plus the ones v3 add
 | **`adoption_invalid`** *(v3.6.1)* | the record is not a valid `asop.adoption/1` of exactly this move: digests or impact other than the computed ones |
 | **`approval_invalid`** *(v3.6.1)* | the document is not a valid `asop.approval/1` |
 | **`contract_unsupported`** *(v3.6.1)* | the receiver's installed contract does not implement the record kind or version the request needs |
+| **`human_required`** *(v3.6.1)* | an authenticated actor that is not a declared human (§9) attempted a human-only chain or ownership verb: `chain_adopt`, `approve`, `run_transfer` |
 
-**Storing chain records** *(v3.6.1)*. The eight codes above are what a store returns
+**Storing chain records** *(v3.6.1)*. The codes above, from `manifest_invalid` to `contract_unsupported`, are what a store returns
 when it is asked to record a chain manifest, an adoption or an approval, or to resolve
 one. They were first shipped by an implementation; the specification adopts them so
 that a second implementation refuses the same request with the same code.
@@ -1428,10 +1429,18 @@ that a second implementation refuses the same request with the same code.
   manifest is not partly recorded, and a refused adoption leaves the chain on the
   manifest it was on.
 - **Order.** A store checks in this order, and reports the first failure:
-  `contract_unsupported`, then the record's own validity (`manifest_invalid`,
-  `adoption_invalid`, `approval_invalid`), then what it refers to (`chain_unknown`
-  before `manifest_unknown`; `manifest_member_unknown` before
-  `manifest_digest_mismatch`, member by member in manifest order).
+  1. `contract_unsupported`;
+  2. `human_required`, on the verbs that require a person. Who is asking is settled
+     before what they sent: an agent learns nothing from a refusal about the record.
+     An identity that does not resolve at all is `unauthenticated`, which the
+     transport answers before this;
+  3. for a manifest or an approval, the record's own validity (`manifest_invalid`,
+     `approval_invalid`, or for a transfer `transfer_refused:malformed`), then what it
+     refers to (`manifest_member_unknown` before `manifest_digest_mismatch`, member
+     by member in manifest order);
+  4. for an adoption, whose record the store computes from what it names, what it
+     refers to first (`chain_unknown` before `manifest_unknown`), then
+     `adoption_invalid`.
 - **Retry.** Each is permanent for the same request. It succeeds only once the request,
   or the store's state, changes: a member is activated, a manifest is recorded, or the
   contract is upgraded. `work_conflict` is the one retryable refusal on these verbs,
@@ -1442,9 +1451,31 @@ that a second implementation refuses the same request with the same code.
 - **Transport.** HTTP statuses are an encoding (§8), so none is normative here. The
   reference plane uses 400 for an invalid record, 404 for an unknown chain or target,
   409 for a member or pin conflict, and 501 for `contract_unsupported`.
-- **One legacy use.** An implementation shipped `manifest_member_unknown` for an
-  unrecorded **target** manifest as well. That case is `manifest_unknown`. Readers
-  should accept both until the implementation migrates (`asop.refusals.LEGACY_USES`).
+- **Legacy uses**, all from the first implementation, both listed in
+  `asop.refusals.LEGACY_USES`. Readers MUST accept the legacy code for its one
+  situation through v3.7. Writers SHOULD emit the specified code now.
+  - `manifest_member_unknown` for an unrecorded **target** manifest. That case is
+    `manifest_unknown`.
+  - `capability_mismatch` for a non-human `chain_adopt`, `approve` or `run_transfer`.
+    That case is `human_required`; for a human who is not an administrator,
+    `transfer_refused:administrator`.
+  - `transfer_invalid` for a transfer with no reason, or to its current owner. Those
+    are `transfer_refused:reason` and `transfer_refused:same_owner`. `capability_mismatch` keeps its meaning — a binding that cannot
+    fill a role or lacks a capability (§5.2, §8.3) — and is not to be used for "not a
+    person".
+
+**Human-only verbs, and which code each uses** *(v3.6.1)*. Every verb this specification
+reserves for a person, so that a reader knows which refusal to expect. No existing
+code changes.
+
+| verb | non-human caller | why |
+|---|---|---|
+| `chain_adopt`, `approve`, `run_transfer` | **`human_required`** | new verbs with no settled code; the one this code exists for |
+| `sop_retire`, `promote` | `revision_policy:human_only` (unchanged) | the revision policy's own rule (§6.4), refused since v3; changing it would change v3.x behaviour |
+| `sop_revise` / `sop_activate` by an agent | `revision_policy:<rule>` (unchanged) | an agent may call these; what it may not do is a rule of the diff, not of who called |
+| `verify_approve` / `verify_reject`, a `human` gate's attestation | `unauthenticated` (unchanged) | the question is whether the named verifier resolves in the registry (§5.3); a different question from "is this a person" |
+| `answer` *(v3.6)* | `unauthenticated` (unchanged) | as v3.6 listed it; a reader may also meet `human_required` there from an implementation that resolved the identity first |
+| a `human` role's step | `capability_mismatch` (unchanged) | a role binding: the binding cannot fill a role of kind `human` (§3.6) |
 - **Not here: `unknown_field`.** It is a refusal from a plane's HTTP surface: a key a
   route does not take. It is not a record refusal; every record already refuses its own
   unknown fields under its own code (`sop_refused`, `gate_invalid`,
@@ -1556,14 +1587,12 @@ that a second implementation refuses the same request with the same code.
     judged entry gates; normative `inputs[].kind` / `outputs[].kind`; declared
     per-step capabilities and environments; and run-instance identity across machines.
 
-11. **Which code refuses a non-human on a human-only chain verb?** **OPEN (v3.6.1).** §8.2
-    gives `chain_adopt` `revision_policy:human_only`, the code the human-only *revision*
-    verbs use. The first plane to implement adoption and approval refuses a non-human
-    caller with `capability_mismatch` instead, and §10 defines that code as "the caller's
-    binding is not eligible for the step's role". Neither reading is plainly right:
-    adoption is not a revision, and being a declared human is not a step's role. Until
-    this is decided, readers should accept either code for these two verbs, and nothing
-    here freezes one.
+11. **Which code refuses a non-human on a human-only chain verb?** ~~Open~~ **DECIDED
+    2026-10-18 (v3.6.1): `human_required`**, a dedicated code, for `chain_adopt`,
+    `approve` and `run_transfer`. §10 says which code every other human-only verb uses,
+    and none of them changes. `capability_mismatch` keeps its meaning, a role or
+    capability binding. For a non-human adopt or approve, readers accept it as a legacy
+    alias through v3.7.
 
 ---
 
