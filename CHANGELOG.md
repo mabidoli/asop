@@ -4,7 +4,7 @@ Version history for the ASOP specification. The specification itself is
 [`ASOP.md`](ASOP.md); this file is where it has been, so the specification can be
 about what it is.
 
-## v3.6.1 / asop-spec 0.6.1 — unreleased
+## v3.6.1 / asop-spec 0.6.1 — 2026-10-18
 
 ### The member digest is normative (§3.10)
 
