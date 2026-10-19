@@ -206,10 +206,15 @@ def may_adjudicate(
     return resolves(actor, adjudicators) or resolves(actor, humans)
 
 
-def may_flip(actor_store: Optional[str], run_owner: Optional[str]) -> bool:
+def may_flip(actor_store: Optional[str], run_owner: Optional[str], *,
+             actor_epoch: Optional[int] = None, run_epoch: Optional[int] = None) -> bool:
     """Whether this store may flip the status of a bead in that run (§7.2).
 
-    Ownership is fixed when the run is filed and no verb moves it. Only the
+    Ownership is fixed when the run is filed and no RUN verb moves it; only a
+    recorded administrative transfer does (v3.6.1, `asop.ownership`), and it
+    bumps the run's ownership epoch. An epoch left out is 0 — the epoch of a
+    run never transferred — so a caller that predates epochs gets the v3.6
+    answer until a transfer happens, and a refusal after. Only the
     owning store completes, fails or parks a bead; every other store is
     refused `not_the_owner` — a different question from `not_the_holder`,
     which asks whether a lease is current. A store can hold a valid lease on
@@ -218,7 +223,37 @@ def may_flip(actor_store: Optional[str], run_owner: Optional[str]) -> bool:
 
     `None` on either side never matches. An unowned run is not everyone's.
     """
-    return actor_store is not None and run_owner is not None and actor_store == run_owner
+    return (actor_store is not None and run_owner is not None and actor_store == run_owner
+            and (actor_epoch or 0) == (run_epoch or 0))
+
+
+#: The verbs that refuse a non-human with `human_required` (ASOP.md §10,
+#: v3.6.1). `retire` and `promote` are human verbs too, but they keep the code
+#: they always had, `revision_policy:human_only`; answering a human gate keeps
+#: `unauthenticated`. See ASOP.md §10, "Human-only verbs".
+HUMAN_REQUIRED_VERBS = ("chain_adopt", "approve", "run_transfer")
+
+
+def require_declared_human(actor: Optional[str], humans: Iterable[str], *, verb: str) -> str:
+    """Refuse `human_required` unless `actor` is a declared human (§9).
+
+    For the human-only verbs of `HUMAN_REQUIRED_VERBS`. `actor` is the
+    AUTHENTICATED caller — authentication is the transport's, so an identity
+    that does not resolve at all is `unauthenticated` before this is asked. This
+    is the next question: the caller is known, and is not a person the operator
+    declared. `capability_mismatch` is NOT this: it is a binding that cannot
+    fill a role, and readers accept it here only as a legacy alias
+    (`asop.refusals.LEGACY_USES`). Not `require_human`, which is the revision
+    policy's `human_only` rule for `retire` and `promote`."""
+    from asop.errors import Refusal
+    if kind_of(actor, humans) != HUMAN:
+        raise Refusal(
+            code="human_required",
+            message=f"{actor!r} is not a declared human, and '{verb}' is a person's act",
+            remediation="Have a person the operator declared in ASOP_HUMANS do it. An agent may "
+                        "prepare it and ask; it may not record it.",
+        )
+    return actor
 
 
 def kind_of(actor: Optional[str], humans: Iterable[str]) -> str:

@@ -49,6 +49,7 @@ from asop.chain import (
     plan_join,
     plan_rework,
     preflight_checks,
+    validate_approval,
     join_state,
     requires_satisfied,
     validate_chain_fields,
@@ -65,7 +66,15 @@ from asop.journal import (
 )
 from asop.manifest import (
     ADOPTION_REQUIRED,
+    STORE_FIELDS,
     adoption_impact,
+    adoption_target,
+    check_pinned,
+    require_schema,
+    verify_manifest,
+    body_digest,
+    canonical_json,
+    digest_of,
     is_pinned,
     manifest_digest,
     manifest_resolver,
@@ -73,6 +82,17 @@ from asop.manifest import (
     validate_adoption,
     validate_manifest,
 )
+from asop.ownership import (
+    ADMINISTRATORS_ENV_VAR,
+    TRANSFER_RULES,
+    TRANSFER_SCHEMA,
+    administrators_from_env,
+    apply_transfer,
+    check_flip,
+    ownership_of,
+    validate_transfer,
+)
+from asop.revision import HUMAN_REQUIRED_VERBS, require_declared_human
 from asop.sop import (
     ASOP,
     ASOP_VERSION,
@@ -151,12 +171,34 @@ __all__ = [
     # v3.6 — the chain manifest and adoption (§3.10)
     "ADOPTION_REQUIRED",
     "adoption_impact",
+    # v3.6.1 — the member digest, normative (§3.10)
+    "STORE_FIELDS",
+    "body_digest",
+    "canonical_json",
+    "digest_of",
+    # v3.6.1 — storing chain records (§10)
+    "adoption_target",
+    "check_pinned",
+    "require_schema",
+    "validate_approval",
+    "verify_manifest",
     "is_pinned",
     "manifest_digest",
     "manifest_resolver",
     "pin_manifest",
     "validate_adoption",
     "validate_manifest",
+    # v3.6.1 — administrative ownership transfer (§7.2)
+    "ADMINISTRATORS_ENV_VAR",
+    "TRANSFER_RULES",
+    "TRANSFER_SCHEMA",
+    "administrators_from_env",
+    "apply_transfer",
+    "check_flip",
+    "ownership_of",
+    "validate_transfer",
+    "HUMAN_REQUIRED_VERBS",
+    "require_declared_human",
     # v3.6 — journal, resume, staleness, chain outcome (§5.6–§5.8)
     "FAULT_CLASSES",
     "charged_failures",

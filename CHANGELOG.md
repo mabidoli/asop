@@ -4,6 +4,167 @@ Version history for the ASOP specification. The specification itself is
 [`ASOP.md`](ASOP.md); this file is where it has been, so the specification can be
 about what it is.
 
+## v3.6.1 / asop-spec 0.6.1 — unreleased
+
+### The member digest is normative (§3.10)
+
+v3.6 said "a member's digest is the store's" and stopped there. That let every store
+invent its own digest, and a manifest written by one engine could not be verified by
+another. v3.6.1 defines it, as exactly what the first store to verify manifests already
+computes, so none of the digests it has recorded change:
+
+- **Input:** the record's validated body. The seven store-assigned fields (`asop_id`,
+  `version`, `status`, `author`, `author_kind`, `superseded_by`, `created_at`) are
+  removed, and the rest is normalised by `validate_asop`: absent and `null` are the same,
+  text is stripped, tags are folded, and the gate carries every field (`null` where
+  unset).
+- **Serialization:** keys sorted by code point, no whitespace, UTF-8, only `"`, `\`
+  and U+0000–U+001F escaped, no Unicode normalization, decimal integers. Floats and lone
+  surrogates are refused.
+- **Hash:** `sha256:` followed by 64 lowercase hex digits.
+
+v3.6 claimed this serialization was RFC 8785's. That was wrong for keys outside the
+Basic Multilingual Plane, because RFC 8785 sorts by UTF-16 code unit and this sorts by
+code point. The text now says which.
+
+One forward rule: a later version MUST NOT change the normalised body of a record that
+uses none of its new fields, or every pinned chain would be stranded.
+
+### Refusal codes for storing chain records, and the approval validator (§10, §3.7)
+
+The first plane to store manifests, adoptions and approvals shipped eight refusal codes
+the specification did not define. A second implementation would have had to guess them.
+They are now in §10, each reviewed before it was frozen:
+
+| code | when |
+|---|---|
+| `manifest_invalid` | the document is not a valid manifest |
+| `manifest_member_unknown` | a member is absent from the store, or is only a DRAFT |
+| `manifest_digest_mismatch` | a member's digest is not the store's (§3.10) |
+| `manifest_unknown` | **new name**: an impact or adoption target manifest is not recorded for that chain |
+| `chain_unknown` | no manifest has been recorded for the chain |
+| `adoption_invalid` | the record is not exactly the computed move |
+| `approval_invalid` | the document is not a valid approval |
+| `contract_unsupported` | the receiver's contract does not implement the record kind |
+
+The shared rules: every one of these stores nothing; the order of checks is normative;
+each is permanent for the same request; and HTTP statuses are not part of the code.
+
+- **One rename.** The plane raised `manifest_member_unknown` for an unrecorded *target*
+  manifest too. That is not a member, so the case is now `manifest_unknown`. The old use
+  is recorded in `asop.refusals.LEGACY_USES`, and readers accept both until the plane
+  migrates.
+- **`unknown_field` stays out of the vocabulary.** It is the plane's HTTP-surface
+  refusal for a route key. It is catalogued with the plane's other transport codes
+  (`bad_json` and the like) and is not part of §10, because every record already
+  refuses its own unknown fields under its own code.
+- **Left open (§11.11).** The plane refuses a non-human adoption or approval with
+  `capability_mismatch`. §8.2 (v3.6) says `revision_policy:human_only`. Neither is
+  frozen here.
+- `asop.chain.validate_approval` (new) validates `asop.approval/1` as the schema states
+  it. It mirrors the plane's own validator, which agrees on every vector.
+- Store-side checks that raise the codes, all new in `asop.manifest`:
+  - `verify_manifest(doc, fetch)`
+  - `adoption_target(chain, to, current=, manifests=)`
+  - `check_pinned(manifest, asop_id, version)`
+  - `require_schema(doc, supported)`
+- Conformance: `chain-store.yaml`, 22 vectors with a refusal case per code and accept
+  cases beside them. Assertions A164–A171.
+
+### Run ownership: a recorded administrative transfer (§7.2)
+
+§7.2 fixed a run's owner at filing, with no verb able to move it. If a store went away
+(machine retired, operator gone, credential revoked), every run it owned was stranded.
+v3.6.1 keeps the rule for **run** verbs and adds one exception: a **recorded
+administrative transfer** (`asop.ownership-transfer/1`).
+
+- **Who.** A declared administrator who is also a declared human (`ASOP_ADMINISTRATORS`,
+  a new registry), with a required reason.
+- **What it moves.** From the run's current owner, at its epoch + 1.
+- **What it records.** The transfer is appended to the run's `ownership_history`, and
+  the run's ownership `epoch` increases.
+- **Fencing.** After the transfer, the former owner's in-flight completions and
+  attestations are refused `not_the_owner`, and the refusal states the current epoch.
+- **No dependence on the old owner.** It needs no signature from the former owner, and
+  no reachability.
+- **No rewriting.** Completed steps and their evidence are untouched.
+- **Refusals.** `transfer_refused:<rule>`, where the rule is `malformed`,
+  `administrator`, `reason`, `stale` or `same_owner`.
+
+**Reference.**
+- `asop.ownership` (new): `validate_transfer`, `apply_transfer`, `check_flip`,
+  `ownership_of` and `administrators_from_env`.
+- `asop.revision.may_flip` gains optional `actor_epoch` and `run_epoch`. Left out, they
+  are 0, which is the v3.6 answer.
+
+**Schemas.**
+- `ownership-transfer.yaml` (new).
+- `run-ownership.yaml` (new). The contract has no whole-run schema, so this one names a
+  run's ownership fields: `owner`, plus optional `epoch` and `ownership_history`.
+
+**Conformance.**
+- `transfer.yaml`: 9 vectors.
+- Three new `ownership.yaml` vectors for the fenced former owner.
+- Assertions A172–A174.
+
+**What changed in existing text.** Two sentences said ownership "never moves": §7.2 and
+the §11.8 qualification. Both now read "no run verb moves it", with the transfer named
+as the exception, and the `may_flip` docstring says the same. No existing assertion
+said ownership never changes: the six v3.4 ownership vectors cite none, and A078–A080
+(§7) are about planes and harnesses. So no assertion changed. Existing vectors and
+tests are byte-identical to v0.6.0, and the v0.6.0 suite run against this branch gives
+353/353 tests and 229/229 vectors.
+
+Ownership is run state, never ASOP-record state. It cannot enter a member digest: the
+record schema has no such field, and a record carrying one is refused (a test pins
+this).
+
+### `human_required`, and §11.11 closed
+
+There is now one dedicated code, `human_required`. It is raised when an authenticated
+actor that is not a declared human attempts `chain_adopt`, `approve` or `run_transfer`,
+and it comes before any check of the request's content (§10's order, step 2).
+
+- **Reference.** `asop.revision.require_declared_human` and `HUMAN_REQUIRED_VERBS`. The
+  existing `require_human` (the revision policy's `human_only` rule) is untouched.
+- **Transfers.** `run_transfer` raises `human_required` for a non-human, and
+  `transfer_refused:administrator` only for a human who is not an administrator.
+- **Every other human-only verb keeps its code.** §10 now has a table of them:
+  `sop_retire` and `promote` stay `revision_policy:human_only`; verifier answers and
+  `answer` stay `unauthenticated`; a `human` role's step stays `capability_mismatch`.
+  No v3.x behaviour changes.
+- **`capability_mismatch` keeps its meaning,** a role or capability binding. For the
+  human-only case it is a legacy alias. Readers MUST accept it through v3.7
+  (`asop.refusals.LEGACY_UNTIL`); writers SHOULD emit `human_required` now.
+- **Also recorded as legacy uses:** the first implementation's `transfer_invalid` for a
+  reasonless transfer or a transfer to the current owner.
+- **`ASOP_ADMINISTRATORS`** falls back to `AGENTCO_ADMINS`, like every other registry.
+- **Conformance:** 7 `chain-store.yaml` vectors (each verb refused for an agent and
+  accepted for a person, plus an anonymous caller), and 2 changed or added
+  `transfer.yaml` vectors. Assertion A175.
+
+**Compatibility:** a clarification. No document changes validity, and no digest the
+reference implementation computed under 0.6.0 changes. An implementation that computed
+member digests another way must switch (see `MIGRATION.md`). The refusal codes are
+additive: they name refusals the plane already made, and one of them, for one
+situation, under a new name.
+
+### Distribution
+
+- `asop.manifest.body_digest(record, *, asop_id=None)` (new) is the member digest;
+  `STORE_FIELDS`, `canonical_json` and `digest_of` are now exported from `asop`.
+  `pin_manifest`'s default `digest` is `body_digest`, which equals the previous default
+  on the validated body it is given. `canonical_json` refuses a lone surrogate with
+  `ChainContractError` instead of raising `UnicodeEncodeError`.
+- Conformance: `digest.yaml`, 12 vectors. One fixed document pins its digest string.
+  Seven invariance cases (reordered keys, a pretty-printed JSON source with `\u`
+  escapes, store fields present, `null` for absent, a gate field written as `null`,
+  stripped whitespace and folded tag case, and the normalised body itself) must give
+  the same string. Two must differ (changed text, and decomposed Unicode). Two are
+  refused (a float, and an invalid record). Assertions A160–A163.
+- The pinned string was checked byte for byte against the hub's own `store_digest`,
+  under both 0.6.0 and this branch.
+
 ## v3.6 / asop-spec 0.6.0 — 2026-10-17
 
 ### Chains: what a long run taught, as declarations (§3.3, §3.7–§3.10, §5.2–§5.8)

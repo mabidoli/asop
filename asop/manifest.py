@@ -52,12 +52,24 @@ IMPACT_EFFECTS = ("unchanged", "changed", "added", "removed")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 
 
+#: The fields of a stored ASOP record that the STORE assigns (ASOP.md §3.10,
+#: v3.6.1). They change without the procedure changing — a status flip, a
+#: superseding version — so they are not part of what a member digest covers.
+STORE_FIELDS = ("asop_id", "version", "status", "author", "author_kind", "superseded_by", "created_at")
+
+
 def canonical_json(value: Any) -> bytes:
-    """Sorted keys, no whitespace, UTF-8, no NaN. For the documents this module
-    digests — strings, integers, booleans, lists and mappings — this is the
-    same byte string RFC 8785 produces, which is what lets two engines in
-    different languages agree on a digest. A float is refused rather than
-    risked: two languages print floats differently."""
+    """The canonical serialization of ASOP.md §3.10 (normative since v3.6.1):
+
+    - object keys sorted by Unicode CODE POINT (not UTF-16 code unit — this is
+      where it departs from RFC 8785, for keys outside the BMP), no duplicates;
+    - no whitespace anywhere: `,` between items, `:` between key and value;
+    - strings as UTF-8, unescaped except `"`, `\\`, and the controls
+      U+0000–U+001F (`\\b \\f \\n \\r \\t` short, the rest `\\u00xx`
+      lowercase); no Unicode normalization — code points are hashed as given;
+    - integers in decimal, no leading zeros, no `+`, no exponent; `true`,
+      `false`, `null` as written. A float is refused: two languages print
+      floats differently, and a digest is no place to find that out."""
     def check(v: Any) -> None:
         if isinstance(v, float):
             raise ChainContractError("a digested document may not contain a float; write it as a string.")
@@ -70,13 +82,38 @@ def canonical_json(value: Any) -> bytes:
             for x in v:
                 check(x)
     check(value)
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-                      allow_nan=False).encode("utf-8")
+    text = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    try:
+        return text.encode("utf-8")
+    except UnicodeEncodeError as e:  # a lone surrogate has no UTF-8 form
+        raise ChainContractError("a digested document's strings must be valid Unicode (no lone surrogates).") from e
 
 
 def digest_of(value: Any) -> str:
-    """`sha256:<hex>` of `canonical_json(value)`."""
+    """`sha256:` and the 64 lowercase hex digits of SHA-256 over
+    `canonical_json(value)`."""
     return "sha256:" + hashlib.sha256(canonical_json(value)).hexdigest()
+
+
+def body_digest(record: Mapping, *, asop_id: Optional[str] = None) -> str:
+    """A chain member's digest (ASOP.md §3.10): the digest of the record's
+    VALIDATED body.
+
+    1. drop the store-assigned fields (`STORE_FIELDS`) when present — a stored
+       record and the body it was authored from digest the same;
+    2. normalise the rest with `validate_asop` (which refuses an invalid body,
+       `SopContractError`); absent and `null` optional fields are the same
+       thing there, and the normalised gate carries every gate field, `null`
+       where unset;
+    3. `digest_of` the result.
+
+    Normalisation is idempotent, so the normalised body digests the same as
+    the document it came from. `asop_id` defaults to the record's own."""
+    from asop.sop import validate_asop
+    if not isinstance(record, Mapping):
+        raise ChainContractError("a member digest is computed over an ASOP record (a mapping).")
+    body = {k: v for k, v in record.items() if k not in STORE_FIELDS}
+    return digest_of(validate_asop(body, asop_id=asop_id if asop_id is not None else record.get("asop_id")))
 
 
 def manifest_digest(manifest: Mapping) -> str:
@@ -162,12 +199,13 @@ def _edges(body: Mapping) -> list[dict]:
 
 def pin_manifest(asop_id: str, version: int, body: Mapping, resolve: Resolver, *, chain: str,
                  components: Iterable[Mapping] = (),
-                 digest: Callable[[Mapping], str] = digest_of) -> dict:
+                 digest: Callable[[Mapping], str] = body_digest) -> dict:
     """Resolve, once, every procedure a chain started from `(asop_id, version)`
     can reach, and pin it (§3.10). `resolve` is the store's resolver AT CHAIN
     START; `body` is the starting record's validated body. `digest` computes a
-    member's digest from its validated body — the store may pass its own,
-    provided every engine reading the manifest compares the same strings.
+    member's digest from its validated body; the default is `body_digest`,
+    which is the normative member digest (§3.10). Because normalisation is
+    idempotent, it equals `digest_of` of an already-validated body.
 
     Strict, because pinning is the point: a reference that resolves to nothing,
     or two references that would need two versions of one procedure, refuse
@@ -283,3 +321,97 @@ def validate_adoption(doc: Any, *, old: Mapping, new: Mapping) -> dict:
         out["reason"] = _ident(doc["reason"].strip() if isinstance(doc["reason"], str) else doc["reason"],
                                "adoption 'reason'")
     return out
+
+
+# ---------------------------------------------------------------------------
+# v3.6.1: storing chain records — the store-side checks, as refusals (§10)
+# ---------------------------------------------------------------------------
+
+def _refusal(code: str, message: str, remediation: str):
+    from asop.errors import Refusal
+    return Refusal(code=code, message=message, remediation=remediation)
+
+
+def verify_manifest(doc: Any, fetch: Callable[[str, int], Optional[tuple[str, Mapping]]]) -> dict:
+    """What a STORE checks before it records a manifest (§3.10): the document
+    is a manifest (`manifest_invalid`); every member is a version the store
+    holds and could run (`manifest_member_unknown` — absent, or only a DRAFT);
+    and every member's digest is the one the store computes
+    (`manifest_digest_mismatch`). `fetch(asop_id, version)` returns
+    `(status, record)` or None. Returns the validated manifest; raises `Refusal`.
+
+    Member order is the manifest's (sorted), so two stores refuse the same
+    manifest for the same member."""
+    try:
+        manifest = validate_manifest(doc)
+    except ChainContractError as e:
+        raise _refusal("manifest_invalid", str(e), "Correct the manifest and send it again; nothing was stored.") from e
+    for m in manifest["members"]:
+        found = fetch(m["asop_id"], m["version"])
+        if found is None:
+            raise _refusal("manifest_member_unknown", f"{m['asop_id']} v{m['version']} is not in this store",
+                           "Pin only versions this store holds; a manifest pinning nothing resolves nothing.")
+        status, record = found
+        if status == "draft":
+            raise _refusal("manifest_member_unknown",
+                           f"{m['asop_id']} v{m['version']} is a DRAFT, which cannot be run",
+                           "Activate it first, or pin the active version.")
+        try:
+            ours = body_digest(record, asop_id=m["asop_id"])
+        except Exception:  # a record the contract no longer accepts has no digest
+            ours = None
+        if m["digest"] != ours:
+            raise _refusal("manifest_digest_mismatch",
+                           f"{m['asop_id']} v{m['version']}: the manifest says {m['digest']}, "
+                           f"this store's digest is {ours}",
+                           "A member's digest is the store's (ASOP.md §3.10): take it from the store, "
+                           "or compute it with body_digest, never by another rule.")
+    return manifest
+
+
+def adoption_target(chain: str, to: str, *, current: Mapping[str, str],
+                    manifests: Mapping[str, Mapping]) -> tuple[dict, dict]:
+    """The `(old, new)` manifests an impact or an adoption of `to` for `chain`
+    moves between, from what the store has recorded: `current` maps a chain to
+    the digest it runs under, `manifests` a digest to its manifest. Refuses
+    `chain_unknown` when the chain has no manifest, and `manifest_unknown`
+    when `to` is not recorded for THIS chain."""
+    if chain not in current:
+        raise _refusal("chain_unknown", f"no manifest has been recorded for chain {chain!r}",
+                       "Record the chain's manifest first.")
+    new = manifests.get(to)
+    if new is None or new.get("chain") != chain:
+        raise _refusal("manifest_unknown", f"no manifest {to} is recorded for chain {chain!r}",
+                       "Record the target manifest for this chain first, then ask again.")
+    return validate_manifest(manifests[current[chain]]), validate_manifest(new)
+
+
+def check_pinned(manifest: Mapping, asop_id: str, version: Optional[int] = None) -> int:
+    """The version a run of `asop_id` files at in this chain; `adoption_required`
+    when the manifest pins no version of it, or `version` is not the pinned one."""
+    m = validate_manifest(manifest)
+    pinned = next((x["version"] for x in m["members"] if x["asop_id"] == asop_id), None)
+    if pinned is None or (version is not None and version != pinned):
+        raise _refusal(ADOPTION_REQUIRED,
+                       f"the chain pins {asop_id + ' v' + str(pinned) if pinned else 'no version of ' + asop_id}; "
+                       f"the run asked for {'v' + str(version) if version is not None else 'any version'}",
+                       "File at the pinned version, or have a person adopt a manifest that pins the one you need.")
+    return pinned
+
+
+#: The record schemas this package implements; anything else is `contract_unsupported`.
+SUPPORTED_SCHEMAS = ("asop.filing-request/1", "asop.chain-manifest/1", "asop.adoption/1", "asop.approval/1",
+                     "asop.step-journal/1", "asop.chain-outcome/1")
+
+
+def require_schema(doc: Any, supported: Iterable[str] = SUPPORTED_SCHEMAS) -> str:
+    """Refuse `contract_unsupported` when a record names a schema the receiving
+    implementation does not implement. A record kind it cannot validate is
+    refused, never stored unvalidated. A document with no `schema` is not a
+    question of support; its own validator refuses it."""
+    name = doc.get("schema") if isinstance(doc, Mapping) else None
+    if isinstance(name, str) and name not in tuple(supported):
+        raise _refusal("contract_unsupported", f"this implementation does not implement {name!r}",
+                       "Upgrade the receiver's contract to a release that implements it; storing the "
+                       "record unvalidated would be worse than refusing it.")
+    return name

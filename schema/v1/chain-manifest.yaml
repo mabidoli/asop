@@ -41,7 +41,9 @@ properties:
       properties:
         asop_id: {$ref: '#/$defs/exactName'}
         version: {type: integer, minimum: 1}
-        digest: {$ref: '#/$defs/digest'}
+        digest:
+          $ref: '#/$defs/digest'
+          description: The member digest of ASOP.md §3.10 (normative since v3.6.1) — computed, not chosen.
     description: >-
       One entry per procedure, sorted by asop_id — a chain runs ONE version of
       each (a cross-check: asop_ids are unique). `uses` targets are not listed:

@@ -27,7 +27,9 @@ from asop.revision import may_flip
 from asop.chain import (ChainContractError, fanout_startable, join_state, plan_entry, plan_handoffs,
                         plan_join, plan_rework, requires_satisfied, version_in)
 from asop.journal import chain_outcome, charged_failures, resume_point, stale_runs
-from asop.manifest import adoption_impact, manifest_resolver, pin_manifest
+from asop.chain import validate_approval
+from asop.manifest import (adoption_impact, adoption_target, body_digest, check_pinned, manifest_resolver,
+                           pin_manifest, require_schema, validate_adoption, verify_manifest)
 from asop.sop import SopContractError, validate_asop
 
 VECTORS = pathlib.Path(__file__).resolve().parents[1] / "vectors"
@@ -176,7 +178,85 @@ def _chain_outcome(vector: dict, suite: dict) -> tuple[bool, str]:
                     "verdict")
 
 
-V36_QUESTIONS = {"entry": _entry, "rework": _rework, "fanout": _fanout, "manifest": _manifest,
+def _digest(vector: dict, suite: dict) -> tuple[bool, str]:
+    import json
+    doc = json.loads(vector["json"]) if "json" in vector else vector["document"]
+    try:
+        got = body_digest(doc, asop_id=vector.get("asop_id"))
+    except (ChainContractError, SopContractError) as e:
+        if vector.get("expect") == "refuse":
+            return True, f"refuse ({vector.get('refusal', 'sop_refused')})"
+        return False, f"refused: {e}"
+    if vector.get("expect") == "refuse":
+        return False, f"expected a refusal, got {got}"
+    if "digest" in vector:
+        return _compare(got, vector["digest"], "digest")
+    return (False, f"digest must differ from {got}") if got == vector["not_digest"] else (True, "differs")
+
+
+def _chain_store(vector: dict, suite: dict) -> tuple[bool, str]:
+    """v3.6.1: what a store refuses when it records chain records (§10)."""
+    store = suite.get("store") or {}
+    q = vector["question"]
+    try:
+        try:
+            if q == "manifest":
+                def fetch(a, ver):
+                    hit = (store.get(a) or {}).get(ver)
+                    return None if hit is None else (hit["status"], hit["record"])
+                verify_manifest(vector["document"], fetch)
+            elif q == "target":
+                adoption_target(vector["chain"], vector["to"], current=vector["current"], manifests=vector["manifests"])
+            elif q == "adoption":
+                try:
+                    validate_adoption(vector["document"], old=vector["old"], new=vector["new"])
+                except ChainContractError as e:
+                    raise Refusal("adoption_invalid", str(e), "correct the record") from e
+            elif q == "approval":
+                try:
+                    validate_approval(vector["document"])
+                except ChainContractError as e:
+                    raise Refusal("approval_invalid", str(e), "correct the record") from e
+            elif q == "pinned":
+                check_pinned(vector["manifest"], vector["asop_id"], vector.get("version"))
+            elif q == "schema":
+                require_schema(vector["document"])
+            elif q == "human":
+                from asop.revision import require_declared_human
+                require_declared_human(vector["actor"], suite.get("humans") or [], verb=vector["verb"])
+            else:
+                return False, f"unknown question {q!r}"
+        except Refusal:
+            raise
+    except Refusal as r:
+        if r.code not in REFUSAL_CODES:
+            return False, f"{r.code!r} is not in asop.refusals"
+        if vector["expect"] != "refuse":
+            return False, f"refused {r.code}: {r.message}"
+        return _compare(r.code, vector["refusal"], "refusal")
+    return _compare("accept", vector["expect"], "outcome")
+
+
+def _transfer(vector: dict, suite: dict) -> tuple[bool, str]:
+    """v3.6.1: may an administrator move this run's ownership? (§7.2)"""
+    from asop.ownership import apply_transfer
+    try:
+        after = apply_transfer(vector["run"], vector["document"],
+                               administrators=vector.get("administrators") or suite.get("administrators") or [],
+                               humans=suite.get("humans") or [])
+    except Refusal as r:
+        if r.code not in REFUSAL_CODES and r.code.split(":", 1)[0] + ":<rule>" not in REFUSAL_CODES:
+            return False, f"{r.code!r} is not in asop.refusals"
+        if vector["expect"] != "refuse":
+            return False, f"refused {r.code}: {r.message}"
+        return _compare(r.code, vector["refusal"], "refusal")
+    if vector["expect"] != "accept":
+        return False, f"accepted; expected {vector.get('refusal')}"
+    return _compare([after["owner"], after["epoch"], len(after["ownership_history"])],
+                    [vector["owner"], vector["epoch"], vector["history"]], "ownership")
+
+
+V36_QUESTIONS = {"digest": _digest, "transfer": _transfer, "chain-store": _chain_store, "entry": _entry, "rework": _rework, "fanout": _fanout, "manifest": _manifest,
                  "journal": _journal, "staleness": _staleness, "chain-outcome": _chain_outcome}
 
 
@@ -249,7 +329,8 @@ def run_one(artifact: str, vector: dict, suite: dict | None = None) -> tuple[boo
         elif artifact == "ownership":
             # Not a document question either: given a run's owner and a store
             # asking to flip one of its beads, may it? §7.2.
-            got = may_flip(vector["actor_store"], vector["run_owner"])
+            got = may_flip(vector["actor_store"], vector["run_owner"],
+                           actor_epoch=vector.get("actor_epoch"), run_epoch=vector.get("run_epoch"))
             want = vector["may_flip"]
             if got != want:
                 return False, f"expected may_flip={want}, got {got}"

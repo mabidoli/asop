@@ -5,9 +5,10 @@
 > other than the one that did the work, and revised from the evidence its own
 > runs produce.*
 
-**Status:** v3.6. v3's review questions (§11) stand as decided on 2026-09-04, except
+**Status:** v3.6.1. v3's review questions (§11) stand as decided on 2026-09-04, except
 §11.4, which was reversed on 2026-10-10 by the hand-offs of §3.7. v3.1 through v3.4 are
-corrections; v3.5 and v3.6 are additive ([`CHANGELOG.md`](CHANGELOG.md),
+corrections; v3.5 and v3.6 are additive, and v3.6.1 makes the member digest
+normative ([`CHANGELOG.md`](CHANGELOG.md),
 [`MIGRATION.md`](MIGRATION.md)). Every v3.6 behaviour is opt-in by declaration: a v3.5
 record, gate or engine means exactly what it meant.
 Supersedes v2.
@@ -730,9 +731,50 @@ is written when a chain starts:
   manifests (`adoption_impact`), never typed. In-flight runs finish under the version
   they started under (§2.1); runs filed after the adoption resolve from the new
   manifest. Using an unpinned version without one is `adoption_required`.
-- **Digests.** A manifest's digest is sha256 over its canonical JSON (sorted keys, no
-  whitespace, UTF-8); nothing in a manifest is a float, so this is RFC 8785's result
-  too. A member's digest is the store's, and engines compare the strings.
+- **Digests** are defined below, and since v3.6.1 they are normative: two
+  implementations given the same record MUST produce the same string.
+
+**The digest** *(normative, v3.6.1)*. v3.6 said "a member's digest is the store's",
+which let every store invent its own and made a manifest written by one engine
+unverifiable by another. The rule is now the one the first store to verify manifests
+already applied, byte for byte, so no digest it recorded changes:
+
+1. **Input.** A member digest covers the record's **validated body**: the
+   store-assigned fields — `asop_id`, `version`, `status`, `author`, `author_kind`,
+   `superseded_by`, `created_at` — are removed, and the rest is normalised by the
+   record contract (`validate_asop`, §3.1–§3.7). Normalisation is what makes "absent"
+   and "`null`" the same for every optional field, strips surrounding whitespace from
+   text, folds tags to lower case, fills `after`, and writes the normalised gate with
+   **every** gate field, `null` where unset, plus `schema_version`. Normalisation is
+   idempotent, so a validated body digests as the document it came from. A record the
+   contract refuses has no digest, and cannot be pinned.
+2. **Serialization** (`canonical_json`):
+   - object keys sorted by Unicode **code point** — not by UTF-16 code unit, which is
+     where this departs from RFC 8785, for keys outside the Basic Multilingual Plane;
+   - no whitespace: `,` between items, `:` between key and value;
+   - strings encoded as UTF-8, unescaped except `"` → `\"`, `\` → `\\`, and
+     U+0000–U+001F: `\b \f \n \r \t` in short form, the rest as `\u00xx` with
+     lowercase hex. `/`, U+007F and everything above U+001F are written as themselves;
+   - **no Unicode normalization**: code points are hashed as given, so a decomposed
+     `é` is a different string, and a different digest, from a precomposed one;
+   - integers in decimal with no leading zeros, no `+` and no exponent; `true`,
+     `false` and `null` as written;
+   - a **float** is refused, and so is a string with a lone surrogate: neither has a
+     form two languages agree on.
+3. **Hash and encoding.** SHA-256 over those bytes, written `sha256:` followed by 64
+   **lowercase** hex digits (`digest_of`; for a record, `body_digest`).
+
+A manifest's own digest is the same serialization and hash over the validated
+manifest. The vectors in `digest.yaml` pin a document and its digest string, and the
+cases that must and must not change it.
+
+**What this binds in later versions.** Because the normalised gate writes every gate
+field, a later version that added a gate field to the normalised output would change
+the digest of every record, including the ones that do not use it, and strand every
+pinned chain. A later version therefore MUST NOT change the normalised body of a record
+that uses none of its new fields. The three gate fields v3.6 added (`default`,
+`cannot_evaluate_exit`, `min_cases`) are part of the v3.6.1 digest input as `null`; a
+v3.5 record's digest under v3.6.1 includes them.
 
 **Opt-in, deliberately.** An engine that starts chains without a manifest is the v3.5
 engine it always was, resolving ranges at filing, and conforms to v3.6; it does not get
@@ -1094,10 +1136,48 @@ exist in two places, which is the failure §11.8 refused.
 
 ### 7.2 One run, one owner
 
-Ownership is recorded on the run when it is filed and no verb moves it. The store that
-owns a run is the only one that may flip the status of its beads; any other store
+Ownership is recorded on the run when it is filed and no **run** verb moves it. The store
+that owns a run is the only one that may flip the status of its beads; any other store
 attempting it is refused **`not_the_owner`** (§10) — a distinct code from
 `not_the_holder`, which is about a lease, not about authority.
+
+**Administrative transfer** *(v3.6.1)*. The one exception. A store goes away — its
+machine is retired, its operator leaves, its credential is revoked — and without an
+exception every run it owned would be stranded, because the only party allowed to
+complete them can no longer speak. A **recorded administrative transfer**
+(`asop.ownership-transfer/1`, [schema](schema/v1/ownership-transfer.yaml)) may move a
+run to another store:
+
+- **Human-only, by a declared administrator.** The actor — authenticated by the
+  transport, never named in the body (§9) — must be in `ASOP_ADMINISTRATORS` **and**
+  `ASOP_HUMANS`. An empty administrator registry transfers nothing, which is v3.6's
+  behaviour.
+- **With a reason**, required and non-blank.
+- **The next transfer of this run, exactly.** `from` is the run's current owner and
+  `epoch` is its current ownership epoch + 1. A transfer naming anything else is
+  refused (`stale`), so two administrators racing cannot both win.
+- **Recorded.** The transfer is appended to the run's `ownership_history` (who, when,
+  from, to, reason), and the run's `owner` and `epoch` become the transfer's
+  ([schema](schema/v1/run-ownership.yaml)). A run never transferred is at epoch 0 with
+  no history; both fields are optional, so every v3.6 run is a valid v3.6.1 run.
+- **The former owner is fenced.** Every flip, completion and attestation carries the
+  epoch its store believes it holds. After a transfer, anything the former owner sends
+  is refused `not_the_owner`, and the refusal states the run's current epoch. That
+  holds even while the former owner's executors still have live leases, and even if the
+  run is later transferred back: a stale epoch is refused whoever sends it. A store that
+  predates epochs claims epoch 0, which is accepted only until the run's first transfer.
+- **Needs nothing from the former owner**: no signature, no reachability, no valid
+  credential. A transfer that the store being replaced could block would not solve the
+  problem it exists for.
+- **Rewrites nothing done.** Completed steps keep their status, their attestations and
+  their evidence, and outcomes already counted stay counted. Only who may flip the
+  **remaining** beads changes; the new owner re-claims them under new leases.
+- Refusals are `transfer_refused:<rule>`: `malformed`, `administrator`, `reason`,
+  `stale` or `same_owner`.
+
+Ownership lives on the run, never on the ASOP record. It is not part of a chain
+member's digest (§3.10): the record schema has no ownership field, and a record that
+carries one is refused rather than digested.
 
 A **journal** is what a non-owning plane receives: it may read, count, run the lessons
 pass and route human gates, and it may not complete a step. To be useful to the lessons
@@ -1196,10 +1276,13 @@ to one.
 | `drifted(run_id)` | any | — | whether the pinned version is no longer active | — |
 | `handoff(run_id, requests?)` *(v3.5)* | the engine that owns the run | run complete | files what §3.7 decides; records each filing, duplicate and refusal with the run as parent | `handoff_refused:<rule>` |
 | `chain_start(asop_id, inputs)` *(v3.6)* | human or agent | as `run`; every reachable member pinnable | pins the chain manifest (§3.10), then files the first run as `run` does | as `run`, `sop_refused` |
-| `chain_adopt(chain, manifest)` *(v3.6)* | a declared human | the chain has a manifest | records an adoption with the computed impact; later filings resolve from the new manifest | `revision_policy:human_only`, `sop_refused` |
+| `manifest_record(manifest)` *(v3.6.1)* | the engine | every member held, runnable, at the store's digest | stores the manifest; the first one recorded for a chain is the one it starts under | `manifest_invalid`, `manifest_member_unknown`, `manifest_digest_mismatch`, `contract_unsupported` |
+| `chain_adopt(chain, manifest)` *(v3.6)* | a declared human | the chain has a manifest | records an adoption with the computed impact; later filings resolve from the new manifest | `human_required`, `chain_unknown`, `manifest_unknown`, `adoption_invalid`, `work_conflict`, `contract_unsupported` |
+| `approve(artefact, digest, subset?)` *(v3.6.1)* | a declared human | — | records an `asop.approval/1`; append-only | `human_required`, `approval_invalid`, `contract_unsupported` |
 | `rework(run_id, trigger)` *(v3.6)* | the engine that owns the run | a declared edge matches | re-runs steps, re-files the owner, or escalates when the rounds are spent (§3.9) | `rework_refused:<rule>` |
 | `answer(question, answer)` *(v3.6)* | a declared human | the question exists | records the answer as an artefact; everything built on the open question is stale (§5.7) | `unauthenticated` |
 | `resume(run_id)` *(v3.6)* | the engine that owns the run | — | re-runs interrupted steps from the journal; not an attempt (§5.6) | `not_the_owner` |
+| `run_transfer(run_id, to, reason)` *(v3.6.1)* | a declared administrator who is human | — | moves ownership, appends to `ownership_history`, bumps the epoch; completed steps untouched (§7.2) | `human_required`, `transfer_refused:<rule>` |
 
 ### 8.3 Executing
 
@@ -1246,6 +1329,7 @@ three answers. The declarations are, alongside the two §6.4 already names:
 | protected tags | `ASOP_PROTECTED_TAGS` | tags that freeze a step against agents (§6.4) |
 | **verifiers** | **`ASOP_VERIFIERS`** | routes that may answer a `judged` or `human` gate (§5.3) |
 | **adjudicators** | **`ASOP_ADJUDICATORS`** | routes that may adjudicate a divergence (§6.1) |
+| **administrators** *(v3.6.1)* | **`ASOP_ADMINISTRATORS`** | people who may transfer a run's ownership (§7.2); each must also be a declared human |
 
 Comma-separated actor names, matched on exact spelling — the same format and the same
 rule as `ASOP_HUMANS`, so an operator declaring who may verify does not have to learn a
@@ -1315,7 +1399,8 @@ stack trace. Codes relevant to ASOPs, from `asop.refusals`, plus the ones v3 add
 | `work_conflict` / `not_the_holder` / `attempt_required` | fenced-lease rules |
 | `capability_mismatch` | the caller's binding is not eligible for the step's role |
 | `attestation_required` / `attestation_invalid` | §5.3 — invalid also covers a `judged`/`human` attestation with no `verdict`, or one not tied to the gate's `check` |
-| **`not_the_owner`** *(v3.4)* | a store tried to flip a bead of a run another store owns (§7.2). Distinct from `not_the_holder`, which is about a lease rather than about authority |
+| **`not_the_owner`** *(v3.4)* | a store tried to flip a bead of a run another store owns (§7.2), or *(v3.6.1)* owned at an earlier ownership epoch; the refusal states the current epoch. Distinct from `not_the_holder`, which is about a lease rather than about authority |
+| **`transfer_refused:<rule>`** *(v3.6.1)* | an administrative ownership transfer was refused: `malformed`, `administrator`, `reason`, `stale` or `same_owner` (§7.2) |
 | **`unauthenticated`** *(v3.2)* | a claimed adjudicator, verifier, or judge identity does not resolve against the operator's declared registry (§5.3, §6.1, §9) |
 | `not_terminal` | a verdict on a bead that is not parked |
 | `metadata_reserved` / `natural_key_reserved` | a caller wrote a plane-owned key |
@@ -1325,6 +1410,77 @@ stack trace. Codes relevant to ASOPs, from `asop.refusals`, plus the ones v3 add
 | **`handoff_refused:<rule>`** *(v3.5)* | a finished run's hand-off or filing request was refused; the rule is one of §3.7's nine, or *(v3.6)* `order` or `approval` |
 | **`rework_refused:<rule>`** *(v3.6)* | a declared rework edge could not be applied: `undeclared`, `version`, `findings` or `owner` (§3.9) |
 | **`adoption_required`** *(v3.6)* | a chain run would use a version or component its manifest does not pin; moving needs a recorded adoption (§3.10) |
+| **`manifest_invalid`** *(v3.6.1)* | the document is not a valid `asop.chain-manifest/1` |
+| **`manifest_member_unknown`** *(v3.6.1)* | a member pins a version the store does not hold as a **runnable** version: absent, or only a DRAFT (§5.1) |
+| **`manifest_digest_mismatch`** *(v3.6.1)* | a member's digest is not the one the store computes for that version (§3.10) |
+| **`manifest_unknown`** *(v3.6.1)* | an impact or adoption names a target manifest not recorded for **that** chain |
+| **`chain_unknown`** *(v3.6.1)* | no manifest has been recorded for the chain named |
+| **`adoption_invalid`** *(v3.6.1)* | the record is not a valid `asop.adoption/1` of exactly this move: digests or impact other than the computed ones |
+| **`approval_invalid`** *(v3.6.1)* | the document is not a valid `asop.approval/1` |
+| **`contract_unsupported`** *(v3.6.1)* | the receiver's installed contract does not implement the record kind or version the request needs |
+| **`human_required`** *(v3.6.1)* | an authenticated actor that is not a declared human (§9) attempted a human-only chain or ownership verb: `chain_adopt`, `approve`, `run_transfer` |
+
+**Storing chain records** *(v3.6.1)*. The codes above, from `manifest_invalid` to `contract_unsupported`, are what a store returns
+when it is asked to record a chain manifest, an adoption or an approval, or to resolve
+one. They were first shipped by an implementation; the specification adopts them so
+that a second implementation refuses the same request with the same code.
+
+- **Effect.** Every one of them stores **nothing** and changes nothing. A refused
+  manifest is not partly recorded, and a refused adoption leaves the chain on the
+  manifest it was on.
+- **Order.** A store checks in this order, and reports the first failure:
+  1. `contract_unsupported`;
+  2. `human_required`, on the verbs that require a person. Who is asking is settled
+     before what they sent: an agent learns nothing from a refusal about the record.
+     An identity that does not resolve at all is `unauthenticated`, which the
+     transport answers before this;
+  3. for a manifest or an approval, the record's own validity (`manifest_invalid`,
+     `approval_invalid`, or for a transfer `transfer_refused:malformed`), then what it
+     refers to (`manifest_member_unknown` before `manifest_digest_mismatch`, member
+     by member in manifest order);
+  4. for an adoption, whose record the store computes from what it names, what it
+     refers to first (`chain_unknown` before `manifest_unknown`), then
+     `adoption_invalid`.
+- **Retry.** Each is permanent for the same request. It succeeds only once the request,
+  or the store's state, changes: a member is activated, a manifest is recorded, or the
+  contract is upgraded. `work_conflict` is the one retryable refusal on these verbs,
+  meaning the chain moved while the adoption was being recorded.
+- **Remediation.** As everywhere in this contract, a refusal carries a `remediation`
+  sentence that names the next action, written at the call site for the payload in hand.
+  It is non-normative text.
+- **Transport.** HTTP statuses are an encoding (§8), so none is normative here. The
+  reference plane uses 400 for an invalid record, 404 for an unknown chain or target,
+  409 for a member or pin conflict, and 501 for `contract_unsupported`.
+- **Legacy uses**, all from the first implementation, both listed in
+  `asop.refusals.LEGACY_USES`. Readers MUST accept the legacy code for its one
+  situation through v3.7. Writers SHOULD emit the specified code now.
+  - `manifest_member_unknown` for an unrecorded **target** manifest. That case is
+    `manifest_unknown`.
+  - `capability_mismatch` for a non-human `chain_adopt`, `approve` or `run_transfer`.
+    That case is `human_required`; for a human who is not an administrator,
+    `transfer_refused:administrator`.
+  - `transfer_invalid` for a transfer with no reason, or to its current owner. Those
+    are `transfer_refused:reason` and `transfer_refused:same_owner`. `capability_mismatch` keeps its meaning — a binding that cannot
+    fill a role or lacks a capability (§5.2, §8.3) — and is not to be used for "not a
+    person".
+
+**Human-only verbs, and which code each uses** *(v3.6.1)*. Every verb this specification
+reserves for a person, so that a reader knows which refusal to expect. No existing
+code changes.
+
+| verb | non-human caller | why |
+|---|---|---|
+| `chain_adopt`, `approve`, `run_transfer` | **`human_required`** | new verbs with no settled code; the one this code exists for |
+| `sop_retire`, `promote` | `revision_policy:human_only` (unchanged) | the revision policy's own rule (§6.4), refused since v3; changing it would change v3.x behaviour |
+| `sop_revise` / `sop_activate` by an agent | `revision_policy:<rule>` (unchanged) | an agent may call these; what it may not do is a rule of the diff, not of who called |
+| `verify_approve` / `verify_reject`, a `human` gate's attestation | `unauthenticated` (unchanged) | the question is whether the named verifier resolves in the registry (§5.3); a different question from "is this a person" |
+| `answer` *(v3.6)* | `unauthenticated` (unchanged) | as v3.6 listed it; a reader may also meet `human_required` there from an implementation that resolved the identity first |
+| a `human` role's step | `capability_mismatch` (unchanged) | a role binding: the binding cannot fill a role of kind `human` (§3.6) |
+- **Not here: `unknown_field`.** It is a refusal from a plane's HTTP surface: a key a
+  route does not take. It is not a record refusal; every record already refuses its own
+  unknown fields under its own code (`sop_refused`, `gate_invalid`,
+  `attestation_invalid`, and the codes above). So it is catalogued in `asop.refusals`
+  with the plane's other transport codes, and it is not part of this vocabulary.
 
 ---
 
@@ -1395,7 +1551,8 @@ stack trace. Codes relevant to ASOPs, from `asop.refusals`, plus the ones v3 add
    standalone, or connected-and-the-plane-owns-everything — and its objection to the
    alternative was precise: accepting outcomes for runs it did not file "leaves two
    queues to agree about one run". §7 now answers that objection rather than reopening
-   it. Ownership is fixed at filing and never moves, so two queues never hold one run;
+   it. Ownership is fixed at filing and no run verb moves it — since v3.6.1, only a recorded
+   administrative transfer (§7.2) — so two queues never hold one run;
    a locally-filed run is owned locally and journalled upward, and the plane may not
    complete a step of a run it does not own. What changes is only that "connected" no
    longer implies "everything was filed there".
@@ -1429,6 +1586,13 @@ stack trace. Codes relevant to ASOPs, from `asop.refusals`, plus the ones v3 add
     `cannot_evaluate` for every deterministic gate's exit 3 without a declaration;
     judged entry gates; normative `inputs[].kind` / `outputs[].kind`; declared
     per-step capabilities and environments; and run-instance identity across machines.
+
+11. **Which code refuses a non-human on a human-only chain verb?** ~~Open~~ **DECIDED
+    2026-10-18 (v3.6.1): `human_required`**, a dedicated code, for `chain_adopt`,
+    `approve` and `run_transfer`. §10 says which code every other human-only verb uses,
+    and none of them changes. `capability_mismatch` keeps its meaning, a role or
+    capability binding. For a non-human adopt or approve, readers accept it as a legacy
+    alias through v3.7.
 
 ---
 
@@ -1478,6 +1642,7 @@ stack trace. Codes relevant to ASOPs, from `asop.refusals`, plus the ones v3 add
 | **adoption** | a person's recorded move of a chain to another manifest, with a computed impact report (§3.10) |
 | **chain outcome** | the chain-level record computed from the ledger, and the chain's row in `outcomes_by_version` (§5.8) |
 | **fault class** | why something failed: `work`, `environment`, `checker`, `handoff`, `decision`. Only `work` is charged (§5.4) |
+| **ownership epoch** | a counter on a run, bumped by each administrative transfer; a flip at an older epoch is `not_the_owner` (§7.2) |
 | **plane** | a coordination layer storing ASOPs and outcomes across harnesses |
 | **harness** | a runtime that executes beads; runs alone or reports to a plane |
 

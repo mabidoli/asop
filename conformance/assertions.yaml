@@ -1012,3 +1012,99 @@
   applies_to: chain
   testable: true
   violation: "A chain is reported done while its chain-level check could not evaluate, or two versions are averaged into one row."
+- id: A160
+  section: "3.10"
+  rule: "A chain member's digest covers the record's validated body: optional fields absent or null are the same, the normalised gate carries every gate field (null where unset), and a record the contract refuses has no digest."
+  applies_to: manifest
+  testable: true
+  violation: "Two stores holding the same record pin it under different digests because one digested the authored document and the other the normalised one."
+- id: A161
+  section: "3.10"
+  rule: "The store-assigned fields asop_id, version, status, author, author_kind, superseded_by and created_at are excluded from a member digest."
+  applies_to: manifest
+  testable: true
+  violation: "Activating or superseding a version changes its digest and strands every chain that pinned it."
+- id: A162
+  section: "3.10"
+  rule: "The digest is 'sha256:' and 64 lowercase hex digits of SHA-256 over canonical JSON: keys sorted by code point, no whitespace, UTF-8 with only quote, backslash and U+0000-U+001F escaped, no Unicode normalization, decimal integers; floats and lone surrogates are refused."
+  applies_to: manifest
+  testable: true
+  violation: "An implementation sorting keys by UTF-16, pretty-printing, NFC-normalising or printing a float computes a different string for the same record."
+- id: A163
+  section: "3.10"
+  rule: "Any change to a record's validated body, including a change of code points that render alike, changes its digest."
+  applies_to: manifest
+  testable: true
+  violation: "A changed procedure keeps the digest of the version a person adopted."
+- id: A164
+  section: "10"
+  rule: "A store refuses to record a document that is not a valid asop.chain-manifest/1 with manifest_invalid, storing nothing."
+  applies_to: manifest
+  testable: true
+  violation: "A malformed manifest is stored, or refused under a code another store does not use."
+- id: A165
+  section: "10"
+  rule: "A store refuses a manifest pinning a version it does not hold, or holds only as a DRAFT, with manifest_member_unknown."
+  applies_to: manifest
+  testable: true
+  violation: "A chain pins a draft or a version nobody holds, and resolves nothing."
+- id: A166
+  section: "10"
+  rule: "A store refuses a manifest whose member digest is not the one it computes for that version (§3.10) with manifest_digest_mismatch."
+  applies_to: manifest
+  testable: true
+  violation: "A manifest's digests mean whatever the engine typed."
+- id: A167
+  section: "10"
+  rule: "Impact and adoption refuse an unrecorded chain with chain_unknown, and a target manifest not recorded for that chain with manifest_unknown."
+  applies_to: manifest
+  testable: true
+  violation: "A chain adopts a manifest recorded for another chain, or an unknown chain reads as an empty one."
+- id: A168
+  section: "10"
+  rule: "A store refuses an adoption that is not exactly the computed move with adoption_invalid."
+  applies_to: manifest
+  testable: true
+  violation: "A hand-typed impact report is stored as an adoption."
+- id: A169
+  section: "3.7"
+  rule: "An approval is a closed asop.approval/1: exact names, a non-empty digest, and a subset of unique string or integer ids; anything else is approval_invalid."
+  applies_to: requires
+  testable: true
+  violation: "An approval with no digest, a boolean subject or a duplicate subject is stored and built on."
+- id: A170
+  section: "3.10"
+  rule: "A run in a pinned chain files only at the version its manifest pins; another version, or a procedure it does not pin, is adoption_required."
+  applies_to: manifest
+  testable: true
+  violation: "A pinned chain files the version active now."
+- id: A171
+  section: "10"
+  rule: "A receiver whose contract does not implement a record kind refuses it with contract_unsupported, never storing it unvalidated."
+  applies_to: manifest
+  testable: true
+  violation: "An older plane stores a record it cannot validate."
+- id: A172
+  section: "7.2"
+  rule: "A run's ownership moves only by a recorded administrative transfer: by a declared administrator who is a declared human, with a non-blank reason, from the current owner at epoch + 1 to a different store; it needs nothing from the former owner; anything else is transfer_refused:<rule>."
+  applies_to: run
+  testable: true
+  violation: "An agent, a non-administrator or a reasonless request moves a run, or a transfer waits on the owner it replaces."
+- id: A173
+  section: "7.2"
+  rule: "After a transfer, a flip by any store at an earlier ownership epoch, including the former owner, is refused not_the_owner; a caller that states no epoch is at epoch 0."
+  applies_to: run
+  testable: true
+  violation: "The former owner's in-flight completion lands after the run was transferred."
+- id: A174
+  section: "7.2"
+  rule: "A transfer changes only the run's owner, epoch and ownership history; completed steps, their evidence and counted outcomes are unchanged."
+  applies_to: run
+  testable: true
+  violation: "A transfer re-opens or re-attests a completed step."
+- id: A175
+  section: "10"
+  rule: "A non-human (including an unnamed caller) attempting chain_adopt, approve or run_transfer is refused human_required, before the request's content is checked; a declared human passes this check."
+  applies_to: run
+  testable: true
+  violation: "An agent records an adoption, an approval or a transfer, or is refused capability_mismatch, which means a role binding."

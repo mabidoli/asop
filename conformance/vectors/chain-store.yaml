@@ -1,0 +1,608 @@
+# Conformance vectors — what does a STORE refuse when it records chain records? (§10, v3.6.1)
+#
+# Each vector names a `question`:
+#   manifest — record this manifest, given the store's `store` (asop_id -> version
+#              -> {status, record}): verify_manifest
+#   target   — impact/adopt manifest `to` for `chain`, given `current` (chain ->
+#              digest it runs under) and `manifests` (digest -> manifest)
+#   adoption — is `document` an adoption of exactly the move `old` -> `new`?
+#   approval — is `document` a valid asop.approval/1?
+#   pinned   — may a run of `asop_id` (at `version`) file under `manifest`?
+#   schema   — does this implementation implement the record's `schema`?
+#   human    — may `actor` perform the human-only `verb`, given the suite's `humans`?
+# `expect` is accept, or refuse with `refusal`, which must be a catalogued code.
+# The digests in `store` are the §3.10 member digests of the records beside them.
+
+artifact: chain-store
+humans: [dana]
+store:
+  intake:
+    1:
+      status: active
+      record:
+        title: Intake
+        inputs:
+          - name: root
+        roles:
+          w:
+            kind: agent
+        steps:
+          - name: do
+            role: w
+            purpose: Intake
+            gate:
+              kind: deterministic
+              check: make check
+  extract:
+    2:
+      status: active
+      record:
+        title: Extract
+        inputs:
+          - name: root
+        roles:
+          w:
+            kind: agent
+        steps:
+          - name: do
+            role: w
+            purpose: Extract
+            gate:
+              kind: deterministic
+              check: make check
+    3:
+      status: draft
+      record:
+        title: Extract v3
+        inputs:
+          - name: root
+        roles:
+          w:
+            kind: agent
+        steps:
+          - name: do
+            role: w
+            purpose: Extract v3
+            gate:
+              kind: deterministic
+              check: make check
+vectors:
+  - id: cs-manifest-accepted
+    asserts:
+      - A164
+    question: manifest
+    document:
+      schema: asop.chain-manifest/1
+      chain: C1
+      start:
+        asop_id: intake
+        version: 1
+      members:
+        - asop_id: extract
+          version: 2
+          digest: sha256:922a42b77809a6dc11c231ca76374ad624549d6f27151567ee964f6f4f430da6
+        - asop_id: intake
+          version: 1
+          digest: sha256:bfbfb0fc351daf436a6fd63ae493e0640ddd3e44fc6f634ee9eb4bfc8ab563fb
+    expect: accept
+    because: every member is held, runnable, and at the store's own digest
+  - id: cs-manifest-invalid
+    asserts:
+      - A164
+    question: manifest
+    document:
+      schema: asop.chain-manifest/1
+      chain: C1
+      start:
+        asop_id: intake
+        version: 1
+      members: []
+    expect: refuse
+    refusal: manifest_invalid
+    because: 'not a manifest: nothing is stored'
+  - id: cs-member-absent
+    asserts:
+      - A165
+    question: manifest
+    document:
+      schema: asop.chain-manifest/1
+      chain: C1
+      start:
+        asop_id: intake
+        version: 1
+      members:
+        - asop_id: extract
+          version: 9
+          digest: sha256:922a42b77809a6dc11c231ca76374ad624549d6f27151567ee964f6f4f430da6
+        - asop_id: intake
+          version: 1
+          digest: sha256:bfbfb0fc351daf436a6fd63ae493e0640ddd3e44fc6f634ee9eb4bfc8ab563fb
+    expect: refuse
+    refusal: manifest_member_unknown
+    because: a pin of a version the store does not hold resolves nothing
+  - id: cs-member-draft
+    asserts:
+      - A165
+    question: manifest
+    document:
+      schema: asop.chain-manifest/1
+      chain: C1
+      start:
+        asop_id: intake
+        version: 1
+      members:
+        - asop_id: extract
+          version: 3
+          digest: sha256:922a42b77809a6dc11c231ca76374ad624549d6f27151567ee964f6f4f430da6
+        - asop_id: intake
+          version: 1
+          digest: sha256:bfbfb0fc351daf436a6fd63ae493e0640ddd3e44fc6f634ee9eb4bfc8ab563fb
+    expect: refuse
+    refusal: manifest_member_unknown
+    because: a DRAFT cannot be run (§5.1), so it cannot be pinned
+  - id: cs-member-digest-mismatch
+    asserts:
+      - A166
+    question: manifest
+    document:
+      schema: asop.chain-manifest/1
+      chain: C1
+      start:
+        asop_id: intake
+        version: 1
+      members:
+        - asop_id: extract
+          version: 2
+          digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+        - asop_id: intake
+          version: 1
+          digest: sha256:bfbfb0fc351daf436a6fd63ae493e0640ddd3e44fc6f634ee9eb4bfc8ab563fb
+    expect: refuse
+    refusal: manifest_digest_mismatch
+    because: the digest is the store's (§3.10), not whatever the engine typed
+  - id: cs-target-accepted
+    asserts:
+      - A167
+    question: target
+    chain: C1
+    to: sha256:b73d67491a6450d86ebc05845d7b367f5af084cd4105d3f2112c82017d3118b4
+    current:
+      C1: sha256:b0e8ee05a612a45a1d39effc9ba660af8474d8669454db0e4d58915fb1476107
+    manifests:
+      sha256:b0e8ee05a612a45a1d39effc9ba660af8474d8669454db0e4d58915fb1476107:
+        schema: asop.chain-manifest/1
+        chain: C1
+        start:
+          asop_id: intake
+          version: 1
+        members:
+          - asop_id: extract
+            version: 2
+            digest: sha256:922a42b77809a6dc11c231ca76374ad624549d6f27151567ee964f6f4f430da6
+          - asop_id: intake
+            version: 1
+            digest: sha256:bfbfb0fc351daf436a6fd63ae493e0640ddd3e44fc6f634ee9eb4bfc8ab563fb
+      sha256:b73d67491a6450d86ebc05845d7b367f5af084cd4105d3f2112c82017d3118b4:
+        schema: asop.chain-manifest/1
+        chain: C1
+        start:
+          asop_id: intake
+          version: 1
+        members:
+          - asop_id: intake
+            version: 1
+            digest: sha256:bfbfb0fc351daf436a6fd63ae493e0640ddd3e44fc6f634ee9eb4bfc8ab563fb
+    expect: accept
+    because: the chain runs under a recorded manifest and the target is recorded for it
+  - id: cs-chain-unknown
+    asserts:
+      - A167
+    question: target
+    chain: C9
+    to: sha256:b73d67491a6450d86ebc05845d7b367f5af084cd4105d3f2112c82017d3118b4
+    current:
+      C1: sha256:b0e8ee05a612a45a1d39effc9ba660af8474d8669454db0e4d58915fb1476107
+    manifests:
+      sha256:b0e8ee05a612a45a1d39effc9ba660af8474d8669454db0e4d58915fb1476107:
+        schema: asop.chain-manifest/1
+        chain: C1
+        start:
+          asop_id: intake
+          version: 1
+        members:
+          - asop_id: extract
+            version: 2
+            digest: sha256:922a42b77809a6dc11c231ca76374ad624549d6f27151567ee964f6f4f430da6
+          - asop_id: intake
+            version: 1
+            digest: sha256:bfbfb0fc351daf436a6fd63ae493e0640ddd3e44fc6f634ee9eb4bfc8ab563fb
+      sha256:b73d67491a6450d86ebc05845d7b367f5af084cd4105d3f2112c82017d3118b4:
+        schema: asop.chain-manifest/1
+        chain: C1
+        start:
+          asop_id: intake
+          version: 1
+        members:
+          - asop_id: intake
+            version: 1
+            digest: sha256:bfbfb0fc351daf436a6fd63ae493e0640ddd3e44fc6f634ee9eb4bfc8ab563fb
+    expect: refuse
+    refusal: chain_unknown
+    because: a chain with no manifest has nothing to adopt away from
+  - id: cs-target-manifest-unknown
+    asserts:
+      - A167
+    question: target
+    chain: C1
+    to: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    current:
+      C1: sha256:b0e8ee05a612a45a1d39effc9ba660af8474d8669454db0e4d58915fb1476107
+    manifests:
+      sha256:b0e8ee05a612a45a1d39effc9ba660af8474d8669454db0e4d58915fb1476107:
+        schema: asop.chain-manifest/1
+        chain: C1
+        start:
+          asop_id: intake
+          version: 1
+        members:
+          - asop_id: extract
+            version: 2
+            digest: sha256:922a42b77809a6dc11c231ca76374ad624549d6f27151567ee964f6f4f430da6
+          - asop_id: intake
+            version: 1
+            digest: sha256:bfbfb0fc351daf436a6fd63ae493e0640ddd3e44fc6f634ee9eb4bfc8ab563fb
+    expect: refuse
+    refusal: manifest_unknown
+    because: the target is not recorded
+  - id: cs-target-of-another-chain
+    asserts:
+      - A167
+    question: target
+    chain: C1
+    to: sha256:bfaff30dff62ab930c9875c1558fd9a86b86bb3b8216101b7c70e6115965d69d
+    current:
+      C1: sha256:b0e8ee05a612a45a1d39effc9ba660af8474d8669454db0e4d58915fb1476107
+    manifests:
+      sha256:b0e8ee05a612a45a1d39effc9ba660af8474d8669454db0e4d58915fb1476107:
+        schema: asop.chain-manifest/1
+        chain: C1
+        start:
+          asop_id: intake
+          version: 1
+        members:
+          - asop_id: extract
+            version: 2
+            digest: sha256:922a42b77809a6dc11c231ca76374ad624549d6f27151567ee964f6f4f430da6
+          - asop_id: intake
+            version: 1
+            digest: sha256:bfbfb0fc351daf436a6fd63ae493e0640ddd3e44fc6f634ee9eb4bfc8ab563fb
+      sha256:bfaff30dff62ab930c9875c1558fd9a86b86bb3b8216101b7c70e6115965d69d:
+        schema: asop.chain-manifest/1
+        chain: C2
+        start:
+          asop_id: intake
+          version: 1
+        members:
+          - asop_id: intake
+            version: 1
+            digest: sha256:bfbfb0fc351daf436a6fd63ae493e0640ddd3e44fc6f634ee9eb4bfc8ab563fb
+    expect: refuse
+    refusal: manifest_unknown
+    because: a manifest recorded for another chain is not a target for this one
+  - id: cs-adoption-accepted
+    asserts:
+      - A168
+    question: adoption
+    document:
+      schema: asop.adoption/1
+      chain: C1
+      from: sha256:b0e8ee05a612a45a1d39effc9ba660af8474d8669454db0e4d58915fb1476107
+      to: sha256:b73d67491a6450d86ebc05845d7b367f5af084cd4105d3f2112c82017d3118b4
+      adopted_by: dana
+      adopted_at: '2026-10-18T12:00:00Z'
+      impact:
+        - kind: member
+          name: extract
+          from:
+            version: 2
+            digest: sha256:922a42b77809a6dc11c231ca76374ad624549d6f27151567ee964f6f4f430da6
+          to: null
+          effect: removed
+        - kind: member
+          name: intake
+          from:
+            version: 1
+            digest: sha256:bfbfb0fc351daf436a6fd63ae493e0640ddd3e44fc6f634ee9eb4bfc8ab563fb
+          to:
+            version: 1
+            digest: sha256:bfbfb0fc351daf436a6fd63ae493e0640ddd3e44fc6f634ee9eb4bfc8ab563fb
+          effect: unchanged
+    old:
+      schema: asop.chain-manifest/1
+      chain: C1
+      start:
+        asop_id: intake
+        version: 1
+      members:
+        - asop_id: extract
+          version: 2
+          digest: sha256:922a42b77809a6dc11c231ca76374ad624549d6f27151567ee964f6f4f430da6
+        - asop_id: intake
+          version: 1
+          digest: sha256:bfbfb0fc351daf436a6fd63ae493e0640ddd3e44fc6f634ee9eb4bfc8ab563fb
+    new:
+      schema: asop.chain-manifest/1
+      chain: C1
+      start:
+        asop_id: intake
+        version: 1
+      members:
+        - asop_id: intake
+          version: 1
+          digest: sha256:bfbfb0fc351daf436a6fd63ae493e0640ddd3e44fc6f634ee9eb4bfc8ab563fb
+    expect: accept
+    because: the computed impact of exactly this move
+  - id: cs-adoption-typed-impact
+    asserts:
+      - A168
+    question: adoption
+    document:
+      schema: asop.adoption/1
+      chain: C1
+      from: sha256:b0e8ee05a612a45a1d39effc9ba660af8474d8669454db0e4d58915fb1476107
+      to: sha256:b73d67491a6450d86ebc05845d7b367f5af084cd4105d3f2112c82017d3118b4
+      adopted_by: dana
+      adopted_at: '2026-10-18T12:00:00Z'
+      impact: []
+    old:
+      schema: asop.chain-manifest/1
+      chain: C1
+      start:
+        asop_id: intake
+        version: 1
+      members:
+        - asop_id: extract
+          version: 2
+          digest: sha256:922a42b77809a6dc11c231ca76374ad624549d6f27151567ee964f6f4f430da6
+        - asop_id: intake
+          version: 1
+          digest: sha256:bfbfb0fc351daf436a6fd63ae493e0640ddd3e44fc6f634ee9eb4bfc8ab563fb
+    new:
+      schema: asop.chain-manifest/1
+      chain: C1
+      start:
+        asop_id: intake
+        version: 1
+      members:
+        - asop_id: intake
+          version: 1
+          digest: sha256:bfbfb0fc351daf436a6fd63ae493e0640ddd3e44fc6f634ee9eb4bfc8ab563fb
+    expect: refuse
+    refusal: adoption_invalid
+    because: an impact report typed by hand is refused, not stored
+  - id: cs-approval-accepted
+    asserts:
+      - A169
+    question: approval
+    document:
+      schema: asop.approval/1
+      artefact: tasks
+      digest: sha256:aa
+      subset:
+        - T1
+        - 2
+      approved_by: dana
+      approved_at: '2026-10-18T12:00:00Z'
+    expect: accept
+    because: string and integer subject ids
+  - id: cs-approval-no-digest
+    asserts:
+      - A169
+    question: approval
+    document:
+      schema: asop.approval/1
+      artefact: tasks
+      subset:
+        - T1
+        - 2
+      approved_by: dana
+      approved_at: '2026-10-18T12:00:00Z'
+    expect: refuse
+    refusal: approval_invalid
+    because: an approval binds exactly what was looked at
+  - id: cs-approval-duplicate-subject
+    asserts:
+      - A169
+    question: approval
+    document:
+      schema: asop.approval/1
+      artefact: tasks
+      digest: sha256:aa
+      subset:
+        - T1
+        - T1
+      approved_by: dana
+      approved_at: '2026-10-18T12:00:00Z'
+    expect: refuse
+    refusal: approval_invalid
+    because: a subject approved twice is a typo or a merge, not an approval
+  - id: cs-approval-bool-subject
+    asserts:
+      - A169
+    question: approval
+    document:
+      schema: asop.approval/1
+      artefact: tasks
+      digest: sha256:aa
+      subset:
+        - true
+      approved_by: dana
+      approved_at: '2026-10-18T12:00:00Z'
+    expect: refuse
+    refusal: approval_invalid
+    because: true is not a subject id
+  - id: cs-approval-unknown-field
+    asserts:
+      - A169
+    question: approval
+    document:
+      schema: asop.approval/1
+      artefact: tasks
+      digest: sha256:aa
+      subset:
+        - T1
+        - 2
+      approved_by: dana
+      approved_at: '2026-10-18T12:00:00Z'
+      note: lgtm
+    expect: refuse
+    refusal: approval_invalid
+    because: the record is closed
+  - id: cs-approval-padded-name
+    asserts:
+      - A169
+    question: approval
+    document:
+      schema: asop.approval/1
+      artefact: ' tasks'
+      digest: sha256:aa
+      subset:
+        - T1
+        - 2
+      approved_by: dana
+      approved_at: '2026-10-18T12:00:00Z'
+    expect: refuse
+    refusal: approval_invalid
+    because: names are exact (§3.7)
+  - id: cs-pinned-accepted
+    asserts:
+      - A170
+    question: pinned
+    manifest:
+      schema: asop.chain-manifest/1
+      chain: C1
+      start:
+        asop_id: intake
+        version: 1
+      members:
+        - asop_id: extract
+          version: 2
+          digest: sha256:922a42b77809a6dc11c231ca76374ad624549d6f27151567ee964f6f4f430da6
+        - asop_id: intake
+          version: 1
+          digest: sha256:bfbfb0fc351daf436a6fd63ae493e0640ddd3e44fc6f634ee9eb4bfc8ab563fb
+    asop_id: extract
+    version: 2
+    expect: accept
+    because: the pinned version
+  - id: cs-pinned-other-version
+    asserts:
+      - A170
+    question: pinned
+    manifest:
+      schema: asop.chain-manifest/1
+      chain: C1
+      start:
+        asop_id: intake
+        version: 1
+      members:
+        - asop_id: extract
+          version: 2
+          digest: sha256:922a42b77809a6dc11c231ca76374ad624549d6f27151567ee964f6f4f430da6
+        - asop_id: intake
+          version: 1
+          digest: sha256:bfbfb0fc351daf436a6fd63ae493e0640ddd3e44fc6f634ee9eb4bfc8ab563fb
+    asop_id: extract
+    version: 3
+    expect: refuse
+    refusal: adoption_required
+    because: 'no fallback: another version needs an adoption'
+  - id: cs-pinned-not-a-member
+    asserts:
+      - A170
+    question: pinned
+    manifest:
+      schema: asop.chain-manifest/1
+      chain: C1
+      start:
+        asop_id: intake
+        version: 1
+      members:
+        - asop_id: extract
+          version: 2
+          digest: sha256:922a42b77809a6dc11c231ca76374ad624549d6f27151567ee964f6f4f430da6
+        - asop_id: intake
+          version: 1
+          digest: sha256:bfbfb0fc351daf436a6fd63ae493e0640ddd3e44fc6f634ee9eb4bfc8ab563fb
+    asop_id: close
+    expect: refuse
+    refusal: adoption_required
+    because: a procedure the chain does not pin
+  - id: cs-contract-unsupported
+    asserts:
+      - A171
+    question: schema
+    document:
+      schema: asop.chain-manifest/2
+    expect: refuse
+    refusal: contract_unsupported
+    because: a record kind the receiver cannot validate is refused, never stored unvalidated
+  - id: cs-contract-supported
+    asserts:
+      - A171
+    question: schema
+    document:
+      schema: asop.approval/1
+    expect: accept
+    because: a kind this contract implements
+  - id: cs-human-adopts
+    asserts: [A175]
+    question: human
+    verb: chain_adopt
+    actor: dana
+    expect: accept
+    because: "a declared human records the adoption"
+  - id: cs-agent-may-not-adopt
+    asserts: [A175]
+    question: human
+    verb: chain_adopt
+    actor: ops-bot
+    expect: refuse
+    refusal: human_required
+    because: "an agent may read the impact and propose; moving a chain is a person's act"
+  - id: cs-human-approves
+    asserts: [A175]
+    question: human
+    verb: approve
+    actor: dana
+    expect: accept
+  - id: cs-agent-may-not-approve
+    asserts: [A175]
+    question: human
+    verb: approve
+    actor: ops-bot
+    expect: refuse
+    refusal: human_required
+    because: "an approval is a person's; capability_mismatch is a role binding, not this"
+  - id: cs-human-transfers
+    asserts: [A175]
+    question: human
+    verb: run_transfer
+    actor: dana
+    expect: accept
+    because: "human-ness is the first question; whether dana is also an administrator is transfer.yaml's"
+  - id: cs-agent-may-not-transfer
+    asserts: [A175]
+    question: human
+    verb: run_transfer
+    actor: ops-bot
+    expect: refuse
+    refusal: human_required
+  - id: cs-anonymous-is-not-human
+    asserts: [A175]
+    question: human
+    verb: approve
+    actor: null
+    expect: refuse
+    refusal: human_required
+    because: "fail closed: an unnamed in-process caller is an agent"

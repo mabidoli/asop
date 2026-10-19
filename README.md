@@ -14,7 +14,7 @@ been implemented by anyone who did not also write it, which is the honest status
 and the thing I would most like to change.
 
 What exists to make that possible: a normative [schema](schema/v1/) as JSON
-Schema in YAML, and [229 conformance vectors](conformance/) as data, so an
+Schema in YAML, and [283 conformance vectors](conformance/) as data, so an
 implementation in any language can prove it conforms without depending on this
 package or reading a line of Python.
 
@@ -47,6 +47,7 @@ importing the other. This package is that agreement.
 | `asop.chain` | Hand-offs between procedures ([`ASOP.md` §3.7](ASOP.md)): validating a record's chaining, the filing decision, joins, `requires`, escalation — and from v3.6 ordered and approved fan-outs, entry gates (§3.8) and rework edges (§3.9). Every function is pure. |
 | `asop.manifest` | *(v3.6)* The chain manifest (§3.10): pin every reachable procedure once at chain start, resolve from the pin, and move a chain only by a recorded adoption with a computed impact report. |
 | `asop.journal` | *(v3.6)* Per-step journaling and resume (§5.6), what §5.4's budget charges, the staleness rule (§5.7), and the chain outcome record (§5.8). |
+| `asop.ownership` | *(v3.6.1)* Run ownership's one exception (§7.2): a recorded administrative transfer by a declared human administrator (`ASOP_ADMINISTRATORS`), with a reason, that bumps the run's ownership epoch so the former owner is refused `not_the_owner` afterwards. |
 | `asop.refusals` | The refusal-code vocabulary — every machine-readable `code` a `Refusal` carries across the reference plane, named once with a one-line meaning, for a reader scanning codes rather than call sites. |
 
 ## The gate schema
@@ -89,7 +90,7 @@ absent), plus `"schema_version": 1`.
 
 ## Versioning
 
-The specification is at **v3.6** and the package at **0.6.0**. v3.6 is additive: an
+The specification is at **v3.6.1** and the package at **0.6.1**. v3.6 is additive (v3.6.1 makes the chain-member digest normative): an
 adopter at 0.5.0 needs to change nothing, and [`MIGRATION.md`](MIGRATION.md) says what
 to adopt first and what was left for v4.
 
@@ -116,8 +117,8 @@ it is a framework wearing a standard's clothes.
 
 ## Testing
 
-    uv run --extra dev pytest -q                                         # 353 tests
-    uv run --with pyyaml python conformance/runner/python.py --verbose   # 229 vectors
+    uv run --extra dev pytest -q                                         # 402 tests
+    uv run --with pyyaml python conformance/runner/python.py --verbose   # 283 vectors
 
 `pytest` is a dev dependency, not a default one — a bare `uv run pytest` fails with
 "Failed to spawn: `pytest`" because nothing is installed to spawn; `--extra dev` is

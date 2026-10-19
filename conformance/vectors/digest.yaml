@@ -1,0 +1,510 @@
+# Conformance vectors — what is a chain member's DIGEST? (§3.10, v3.6.1)
+#
+# A member digest is `sha256:` and 64 lowercase hex digits of SHA-256 over the
+# canonical JSON of the record's VALIDATED body, store-assigned fields removed.
+# Each vector gives an ASOP record as `document`, or as a `json` source string;
+# `digest` is the string a conforming implementation must produce, byte for byte;
+# `not_digest` is one it must NOT produce; `expect: refuse` means the record
+# cannot be digested at all. The pinned string was cross-checked against an
+# independent store's own digest function before it was written here.
+#
+# `dg-normalised-body-digests-the-same` carries the validated body itself, so an
+# implementation can tell a normalisation difference from a serialization one.
+
+artifact: digest
+vectors:
+  - id: dg-fixed-document
+    asserts:
+      - A160
+      - A161
+      - A162
+    asop_id: intake
+    document:
+      title: Résumé intake — 日本
+      task_type: intake
+      purpose: Frame one source document.
+      inputs: &id001
+        - name: source
+          description: the source document
+      roles: &id002
+        analyst:
+          kind: agent
+        owner:
+          kind: human
+      constraints: &id003
+        - distinct:
+            - analyst
+            - owner
+      outcomes: &id004
+        - FRAMED
+        - NOT_READY
+      outputs: &id005
+        - name: brief
+      steps: &id006
+        - name: frame
+          role: analyst
+          purpose: Write the brief.
+          tags:
+            - intake
+          gate:
+            kind: deterministic
+            check: check-brief
+            cannot_evaluate_exit: 3
+            min_cases: 1
+        - name: sign-off
+          role: owner
+          purpose: A person reads the brief.
+          gate:
+            kind: human
+            check: the brief is right
+            verifier: dana
+            max_park_seconds: 86400
+            on_timeout: escalate
+            escalate_to: dana
+    digest: sha256:81235e55f50bed91912dde6fb856bde8a05194f5bc72b2915884108eb28e6555
+    because: THE PINNED STRING. Every implementation must produce exactly this for this document
+  - id: dg-normalised-body-digests-the-same
+    asserts:
+      - A160
+    asop_id: intake
+    document:
+      title: Résumé intake — 日本
+      task_type: intake
+      purpose: Frame one source document.
+      inputs:
+        - name: source
+          description: the source document
+      outcomes:
+        - FRAMED
+        - NOT_READY
+      outputs:
+        - name: brief
+      roles:
+        analyst:
+          kind: agent
+        owner:
+          kind: human
+      constraints:
+        - distinct:
+            - analyst
+            - owner
+      steps:
+        - step: 1
+          name: frame
+          role: analyst
+          purpose: Write the brief.
+          gate:
+            schema_version: 1
+            kind: deterministic
+            check: check-brief
+            checks: null
+            max_park_seconds: null
+            on_timeout: null
+            escalate_to: null
+            verifier: null
+            default: null
+            cwd: null
+            timeout_s: null
+            rubric: null
+            judge_route: null
+            cannot_evaluate_exit: 3
+            min_cases: 1
+          tags:
+            - intake
+          after: []
+        - step: 2
+          name: sign-off
+          role: owner
+          purpose: A person reads the brief.
+          gate:
+            schema_version: 1
+            kind: human
+            check: the brief is right
+            checks: null
+            max_park_seconds: 86400
+            on_timeout: escalate
+            escalate_to: dana
+            verifier: dana
+            default: null
+            cwd: null
+            timeout_s: null
+            rubric: null
+            judge_route: null
+            cannot_evaluate_exit: null
+            min_cases: null
+          after:
+            - 1
+    digest: sha256:81235e55f50bed91912dde6fb856bde8a05194f5bc72b2915884108eb28e6555
+    because: 'the validated body of a document digests as the document does: normalisation is idempotent'
+  - id: dg-key-order-is-irrelevant
+    asserts:
+      - A162
+    asop_id: intake
+    document:
+      steps:
+        - gate:
+            min_cases: 1
+            cannot_evaluate_exit: 3
+            check: check-brief
+            kind: deterministic
+          tags:
+            - intake
+          purpose: Write the brief.
+          role: analyst
+          name: frame
+        - gate:
+            escalate_to: dana
+            on_timeout: escalate
+            max_park_seconds: 86400
+            verifier: dana
+            check: the brief is right
+            kind: human
+          purpose: A person reads the brief.
+          role: owner
+          name: sign-off
+      outputs:
+        - name: brief
+      outcomes:
+        - FRAMED
+        - NOT_READY
+      constraints:
+        - distinct:
+            - analyst
+            - owner
+      roles:
+        owner:
+          kind: human
+        analyst:
+          kind: agent
+      inputs:
+        - description: the source document
+          name: source
+      purpose: Frame one source document.
+      task_type: intake
+      title: Résumé intake — 日本
+    digest: sha256:81235e55f50bed91912dde6fb856bde8a05194f5bc72b2915884108eb28e6555
+    because: keys are sorted by code point before hashing; authoring order is not content
+  - id: dg-pretty-json-with-escapes
+    asserts:
+      - A162
+    asop_id: intake
+    json: "{\n    \"title\": \"R\\u00e9sum\\u00e9 intake \\u2014 \\u65e5\\u672c\",\n    \"task_type\"\
+      : \"intake\",\n    \"purpose\": \"Frame one source document.\",\n    \"inputs\": [\n        {\n\
+      \            \"name\": \"source\",\n            \"description\": \"the source document\"\n     \
+      \   }\n    ],\n    \"roles\": {\n        \"analyst\": {\n            \"kind\": \"agent\"\n     \
+      \   },\n        \"owner\": {\n            \"kind\": \"human\"\n        }\n    },\n    \"constraints\"\
+      : [\n        {\n            \"distinct\": [\n                \"analyst\",\n                \"owner\"\
+      \n            ]\n        }\n    ],\n    \"outcomes\": [\n        \"FRAMED\",\n        \"NOT_READY\"\
+      \n    ],\n    \"outputs\": [\n        {\n            \"name\": \"brief\"\n        }\n    ],\n  \
+      \  \"steps\": [\n        {\n            \"name\": \"frame\",\n            \"role\": \"analyst\"\
+      ,\n            \"purpose\": \"Write the brief.\",\n            \"tags\": [\n                \"intake\"\
+      \n            ],\n            \"gate\": {\n                \"kind\": \"deterministic\",\n      \
+      \          \"check\": \"check-brief\",\n                \"cannot_evaluate_exit\": 3,\n         \
+      \       \"min_cases\": 1\n            }\n        },\n        {\n            \"name\": \"sign-off\"\
+      ,\n            \"role\": \"owner\",\n            \"purpose\": \"A person reads the brief.\",\n \
+      \           \"gate\": {\n                \"kind\": \"human\",\n                \"check\": \"the\
+      \ brief is right\",\n                \"verifier\": \"dana\",\n                \"max_park_seconds\"\
+      : 86400,\n                \"on_timeout\": \"escalate\",\n                \"escalate_to\": \"dana\"\
+      \n            }\n        }\n    ]\n}"
+    digest: sha256:81235e55f50bed91912dde6fb856bde8a05194f5bc72b2915884108eb28e6555
+    because: whitespace in the source and \u escapes for the same code points do not reach the hash
+  - id: dg-store-fields-excluded
+    asserts:
+      - A161
+    asop_id: intake
+    document:
+      asop_id: intake
+      version: 7
+      status: superseded
+      author: dana
+      author_kind: human
+      superseded_by: 8
+      created_at: '2026-10-18T00:00:00Z'
+      title: Résumé intake — 日本
+      task_type: intake
+      purpose: Frame one source document.
+      inputs: *id001
+      roles: *id002
+      constraints: *id003
+      outcomes: *id004
+      outputs: *id005
+      steps: *id006
+    digest: sha256:81235e55f50bed91912dde6fb856bde8a05194f5bc72b2915884108eb28e6555
+    because: asop_id, version, status, author, author_kind, superseded_by and created_at are the store's,
+      not the procedure's
+  - id: dg-null-is-absent
+    asserts:
+      - A160
+    asop_id: intake
+    document:
+      title: Résumé intake — 日本
+      task_type: intake
+      purpose: Frame one source document.
+      inputs: *id001
+      roles: *id002
+      constraints: *id003
+      outcomes: *id004
+      outputs: *id005
+      steps: *id006
+      trigger: null
+      handoffs: null
+      requires: null
+    digest: sha256:81235e55f50bed91912dde6fb856bde8a05194f5bc72b2915884108eb28e6555
+    because: an optional field present as null is the field absent
+  - id: dg-unset-gate-field-null-is-absent
+    asserts:
+      - A160
+    asop_id: intake
+    document:
+      title: Résumé intake — 日本
+      task_type: intake
+      purpose: Frame one source document.
+      inputs:
+        - name: source
+          description: the source document
+      roles:
+        analyst:
+          kind: agent
+        owner:
+          kind: human
+      constraints:
+        - distinct:
+            - analyst
+            - owner
+      outcomes:
+        - FRAMED
+        - NOT_READY
+      outputs:
+        - name: brief
+      steps:
+        - name: frame
+          role: analyst
+          purpose: Write the brief.
+          tags:
+            - intake
+          gate:
+            kind: deterministic
+            check: check-brief
+            cannot_evaluate_exit: 3
+            min_cases: 1
+            cwd: null
+        - name: sign-off
+          role: owner
+          purpose: A person reads the brief.
+          gate:
+            kind: human
+            check: the brief is right
+            verifier: dana
+            max_park_seconds: 86400
+            on_timeout: escalate
+            escalate_to: dana
+    digest: sha256:81235e55f50bed91912dde6fb856bde8a05194f5bc72b2915884108eb28e6555
+    because: a gate field written as null normalises to the same null the normaliser writes for an absent
+      one
+  - id: dg-normalised-whitespace-and-tag-case
+    asserts:
+      - A160
+    asop_id: intake
+    document:
+      title: '  Résumé intake — 日本  '
+      task_type: intake
+      purpose: Frame one source document.
+      inputs:
+        - name: source
+          description: the source document
+      roles:
+        analyst:
+          kind: agent
+        owner:
+          kind: human
+      constraints:
+        - distinct:
+            - analyst
+            - owner
+      outcomes:
+        - FRAMED
+        - NOT_READY
+      outputs:
+        - name: brief
+      steps:
+        - name: frame
+          role: analyst
+          purpose: Write the brief.
+          tags:
+            - INTAKE
+          gate:
+            kind: deterministic
+            check: check-brief
+            cannot_evaluate_exit: 3
+            min_cases: 1
+        - name: sign-off
+          role: owner
+          purpose: A person reads the brief.
+          gate:
+            kind: human
+            check: the brief is right
+            verifier: dana
+            max_park_seconds: 86400
+            on_timeout: escalate
+            escalate_to: dana
+    digest: sha256:81235e55f50bed91912dde6fb856bde8a05194f5bc72b2915884108eb28e6555
+    because: the normaliser strips surrounding whitespace from text and folds tags to lower case, so these
+      are the same record
+  - id: dg-changed-text-changes-the-digest
+    asserts:
+      - A163
+    asop_id: intake
+    document:
+      title: Résumé intake — 日本
+      task_type: intake
+      purpose: Frame one source document, again.
+      inputs:
+        - name: source
+          description: the source document
+      roles:
+        analyst:
+          kind: agent
+        owner:
+          kind: human
+      constraints:
+        - distinct:
+            - analyst
+            - owner
+      outcomes:
+        - FRAMED
+        - NOT_READY
+      outputs:
+        - name: brief
+      steps:
+        - name: frame
+          role: analyst
+          purpose: Write the brief.
+          tags:
+            - intake
+          gate:
+            kind: deterministic
+            check: check-brief
+            cannot_evaluate_exit: 3
+            min_cases: 1
+        - name: sign-off
+          role: owner
+          purpose: A person reads the brief.
+          gate:
+            kind: human
+            check: the brief is right
+            verifier: dana
+            max_park_seconds: 86400
+            on_timeout: escalate
+            escalate_to: dana
+    not_digest: sha256:81235e55f50bed91912dde6fb856bde8a05194f5bc72b2915884108eb28e6555
+    because: the procedure changed, so it is a different member
+  - id: dg-no-unicode-normalisation
+    asserts:
+      - A162
+      - A163
+    asop_id: intake
+    document:
+      title: Résumé intake — 日本
+      task_type: intake
+      purpose: Frame one source document.
+      inputs:
+        - name: source
+          description: the source document
+      roles:
+        analyst:
+          kind: agent
+        owner:
+          kind: human
+      constraints:
+        - distinct:
+            - analyst
+            - owner
+      outcomes:
+        - FRAMED
+        - NOT_READY
+      outputs:
+        - name: brief
+      steps:
+        - name: frame
+          role: analyst
+          purpose: Write the brief.
+          tags:
+            - intake
+          gate:
+            kind: deterministic
+            check: check-brief
+            cannot_evaluate_exit: 3
+            min_cases: 1
+        - name: sign-off
+          role: owner
+          purpose: A person reads the brief.
+          gate:
+            kind: human
+            check: the brief is right
+            verifier: dana
+            max_park_seconds: 86400
+            on_timeout: escalate
+            escalate_to: dana
+    not_digest: sha256:81235e55f50bed91912dde6fb856bde8a05194f5bc72b2915884108eb28e6555
+    because: 'code points are hashed as given: the decomposed form of the same title is a different string,
+      and a different digest'
+  - id: dg-refuse-float
+    asserts:
+      - A162
+    asop_id: intake
+    document:
+      title: Résumé intake — 日本
+      task_type: intake
+      purpose: Frame one source document.
+      inputs:
+        - name: source
+          description: the source document
+          kind: 0.5
+      roles:
+        analyst:
+          kind: agent
+        owner:
+          kind: human
+      constraints:
+        - distinct:
+            - analyst
+            - owner
+      outcomes:
+        - FRAMED
+        - NOT_READY
+      outputs:
+        - name: brief
+      steps:
+        - name: frame
+          role: analyst
+          purpose: Write the brief.
+          tags:
+            - intake
+          gate:
+            kind: deterministic
+            check: check-brief
+            cannot_evaluate_exit: 3
+            min_cases: 1
+        - name: sign-off
+          role: owner
+          purpose: A person reads the brief.
+          gate:
+            kind: human
+            check: the brief is right
+            verifier: dana
+            max_park_seconds: 86400
+            on_timeout: escalate
+            escalate_to: dana
+    expect: refuse
+    refusal: sop_refused
+    because: a float has no canonical form two languages agree on; the record cannot be digested, so it
+      cannot be pinned
+  - id: dg-refuse-invalid-record
+    asserts:
+      - A160
+    asop_id: intake
+    document:
+      title: No steps
+    expect: refuse
+    refusal: sop_refused
+    because: only a valid record has a validated body to digest

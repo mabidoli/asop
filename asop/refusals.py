@@ -75,7 +75,7 @@ CODES: dict[str, str] = {
     "bad_ttl": "a lease TTL is not a positive integer within the registry's bound",
     "no_such_lease": "no lease exists for the given key",
     "not_the_holder": "the caller does not hold the lease it tried to act on",
-    "not_the_owner": "the store tried to flip a bead of a run another store owns; a lease is not authority over a run",
+    "not_the_owner": "the store tried to flip a bead of a run another store owns, or owned before an administrative transfer (its ownership epoch is stale); a lease is not authority over a run",
     # -- HTTP surface (agentco/app.py) ---------------------------------------
     "not_an_integer": "a query or body field expected to be an integer was not one",
     "bad_json": "the request body is not valid JSON, or not a JSON object",
@@ -118,4 +118,52 @@ CODES: dict[str, str] = {
     # -- ASOP v3.6: chains (ASOP.md §3.9, §3.10) ----------------------------
     "rework_refused:<rule>": "a declared rework edge could not be applied; the actual code carries the rule after the colon (asop.chain.REWORK_RULES): undeclared, version, findings or owner",
     "adoption_required": "a chain run would use a procedure version or component its chain manifest does not pin; moving a chain needs a recorded human adoption (asop.manifest)",
+    # -- ASOP v3.6.1: storing chain records (ASOP.md §10, asop.manifest) ----
+    "manifest_invalid": "a chain manifest is not a valid asop.chain-manifest/1 document (asop.manifest.validate_manifest); nothing was stored",
+    "manifest_member_unknown": "a chain manifest pins a version the store does not hold as a runnable version: absent, or only a DRAFT (asop.manifest.verify_manifest)",
+    "manifest_digest_mismatch": "a chain manifest gives a member a digest other than the one the store computes for that version (§3.10's member digest)",
+    "manifest_unknown": "an impact or adoption names a target manifest the store has not recorded for that chain",
+    "chain_unknown": "no manifest has been recorded for the chain named, so it has nothing to resolve from or adopt away from",
+    "adoption_invalid": "an adoption is not a valid asop.adoption/1 record of exactly this move (asop.manifest.validate_adoption); nothing was stored",
+    "approval_invalid": "an approval is not a valid asop.approval/1 document (asop.chain.validate_approval); nothing was stored",
+    "human_required": "an actor that is not a declared human attempted a human-only chain or ownership verb (chain_adopt, approve, run_transfer); asop.revision.require_declared_human",
+    "contract_unsupported": "the receiving implementation's installed contract does not implement the record kind or version the request needs; it refuses rather than store what it cannot validate",
+    "transfer_refused:<rule>": "an administrative transfer of run ownership was refused; the rule after the colon is one of asop.ownership.TRANSFER_RULES: malformed, administrator, reason, stale or same_owner",
+    "transfer_invalid": "LEGACY (first implementation): a refused ownership transfer; the specified codes are transfer_refused:reason and transfer_refused:same_owner (LEGACY_USES)",
+    # -- the plane's HTTP surface, not the specification ----------------------
+    "unknown_field": "a request body on a strict route carried a key the route does not take; a transport-level refusal, distinct from a record's own unknown-field refusal (sop_refused, gate_invalid, ...)",
 }
+
+#: The v3.6.1 codes the SPECIFICATION defines for storing chain records
+#: (ASOP.md §10). The rest of `CODES` is catalogued because a caller may see
+#: it, not because every implementation must raise it.
+CHAIN_RECORD_CODES = (
+    "manifest_invalid",
+    "manifest_member_unknown",
+    "manifest_digest_mismatch",
+    "manifest_unknown",
+    "chain_unknown",
+    "human_required",
+    "adoption_invalid",
+    "approval_invalid",
+    "contract_unsupported",
+)
+
+#: Codes an implementation has raised with a meaning the specification later
+#: split or renamed: `(old code, situation) -> the code the spec defines`.
+#: Implementations may keep raising the old code for that situation until they
+#: migrate; readers should accept both.
+LEGACY_USES = {
+    ("manifest_member_unknown", "impact or adoption target manifest not recorded"): "manifest_unknown",
+    ("capability_mismatch", "a non-human attempting chain_adopt or approve"): "human_required",
+    ("capability_mismatch", "a non-human attempting run_transfer"): "human_required",
+    ("capability_mismatch", "a declared human who is not an administrator attempting run_transfer"):
+        "transfer_refused:administrator",
+    ("transfer_invalid", "a transfer with no reason"): "transfer_refused:reason",
+    ("transfer_invalid", "a transfer to the store that already owns the run"): "transfer_refused:same_owner",
+}
+
+#: How long a reader must keep accepting a legacy use: through the next minor
+#: release of the specification (v3.7), after which writers will have had one
+#: minor to move. Writers SHOULD emit the specified code now.
+LEGACY_UNTIL = "v3.7"
